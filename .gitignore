@@ -1,0 +1,55 @@
+# Python virtual environments
+venv/
+.venv/
+
+# Python cache
+__pycache__/
+**/__pycache__/
+*.pyc
+
+# Frontend dependencies/build
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+
+# Environment/secrets
+.env
+*.env
+!.env.example
+
+# OS
+.DS_Store
+
+# IDE
+.vscode/
+
+# Archives
+*.zip
+
+# Logs
+*.log# Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+
+# Python
+backend/.venv/
+backend/venv/
+backend/__pycache__/
+backend/**/__pycache__/
+*.pyc
+
+# Environment / secrets
+.env
+backend/.env
+frontend/.env
+frontend/.env.local
+
+# OS
+.DS_Store
+
+# IDE
+.vscode/
+
+# Generated files
+*.log

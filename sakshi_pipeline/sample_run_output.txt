@@ -1,0 +1,36 @@
+[Layer 0] centroid=(75.76670000000001, 9.499999999999996) area=19.77 km^2 texture=1.575 dB lookalike=False conf=0.82
+  [behavioral] epoch 00: loss = 0.817213
+  [behavioral] epoch 15: loss = 0.612065
+  [behavioral] epoch 30: loss = 0.298250
+  [behavioral] epoch 45: loss = 0.190286
+  [behavioral] epoch 59: loss = 0.134236
+
+======================================================================
+BACKWARD HINDCAST (MAP hypothesis)
+======================================================================
+  Vessel MMSI: 200000000  <-- MSC ELSA III (injected anomaly)
+  Hypothesized t0: 68h before detection
+  Hypothesized origin (lon,lat): (76.1160, 9.3069)
+  Real sinking point (lon,lat):  (76.1360, 9.3125)
+  Origin error vs real sinking point: 0.0208 deg (~2.3 km)
+  L_shape=0.1264  L_age=0.7978  prior=0.8636  score=0.087056
+
+======================================================================
+AGE ESTIMATE
+======================================================================
+  Estimated elapsed time: 67.9h
+  Real elapsed time (per script): 72h
+
+======================================================================
+VESSEL RANKING (summarize() -- marginal of score(h) over vessel)
+======================================================================
+  1. MMSI 200000000: score=0.711000  <-- MSC ELSA III (injected anomaly)
+  2. MMSI 200000001: score=0.000000
+  3. MMSI 200000002: score=0.000000
+  4. MMSI 200000003: score=0.000000
+  5. MMSI 200000004: score=0.000000
+
+======================================================================
+FORWARD FORECAST (+24h past detection, from MAP hypothesis)
+======================================================================
+  Forecast centroid (lon,lat): [75.64025993511832, 9.523611322875917]
