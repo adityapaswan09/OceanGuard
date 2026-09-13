@@ -45,9 +45,7 @@ export function SideRail({ activeSection, onNavigate }: SideRailProps) {
                 })}
             </nav>
             <div className="mt-auto flex items-center gap-2 border-t border-line pt-3 px-1">
-                <span className="flex h-2 w-2 rounded-full bg-success">
-                    <span className="absolute inset-0 rounded-full bg-success" />
-                </span>
+                <span className="h-2 w-2 rounded-full bg-success" />
                 <span className="text-[8px] uppercase tracking-[.15em] text-mist">Online</span>
             </div>
             <p className="px-1 pb-2 text-[8px] uppercase tracking-[.2em] text-mist/60">v1.0.0</p>

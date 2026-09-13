@@ -28,9 +28,7 @@ export function TimelineBar() {
             <div className="flex items-center gap-4 border-t border-line px-5 py-3 lg:border-l lg:border-t-0">
                 <p className="eyebrow">System status</p>
                 <div className="flex items-center gap-2">
-                    <span className="relative h-1.5 w-1.5 rounded-full bg-success">
-                        <span className="absolute inset-0 rounded-full bg-success" />
-                    </span>
+                    <span className="h-1.5 w-1.5 rounded-full bg-success" />
                     <span className="font-mono text-[10px] font-semibold text-success">ALL SERVICES ONLINE</span>
                 </div>
             </div>

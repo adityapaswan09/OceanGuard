@@ -28,9 +28,7 @@ export function TopBar() {
                     </div>
                 </div>
                 <div className="flex items-center gap-2 border-l border-line pl-4">
-                    <span className="relative h-2 w-2 rounded-full bg-success">
-                        <span className="absolute inset-0 rounded-full bg-success" />
-                    </span>
+                    <span className="h-2 w-2 rounded-full bg-success" />
                     <span className="text-[10px] font-semibold uppercase tracking-[.12em] text-success">Operational</span>
                 </div>
                 <div className="h-8 w-8 rounded-full bg-gradient-to-br from-signal to-signalDim text-center text-[11px] font-bold leading-8 text-white">
