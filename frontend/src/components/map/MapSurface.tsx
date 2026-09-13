@@ -13,6 +13,7 @@ interface MapSurfaceProps {
     isIdentifying?: boolean;
     identifyRun?: number;
     identified?: boolean;
+    onVesselSelect?: (vesselId: number) => void;
 }
 
 const layers = ["Satellite", "Bathymetry", "Vector"];
@@ -29,6 +30,7 @@ export function MapSurface({
     isIdentifying,
     identifyRun,
     identified,
+    onVesselSelect,
 }: MapSurfaceProps) {
     return (
         <section className="relative min-h-[430px] flex-1 overflow-hidden border-b border-line bg-navy lg:min-h-0">
@@ -43,22 +45,24 @@ export function MapSurface({
                 isIdentifying={isIdentifying}
                 identifyRun={identifyRun}
                 identified={identified}
+                onVesselSelect={onVesselSelect}
             />
-            <div className="absolute right-5 top-5 z-10 flex rounded-sm border border-[#31516a] bg-[#061624]/95 p-1 shadow-panel">
+            {/* Layer switcher — top-right, interactive */}
+            <div className="absolute right-3 top-3 z-20 flex rounded-sm border border-[#1e3a52] bg-[#020b14]/95 p-0.5 shadow-[0_2px_12px_rgba(0,0,0,0.5)]">
                 {layers.map((layer) => (
-                    <button className={`px-3 py-2 text-[9px] font-semibold uppercase tracking-[.12em] ${activeLayer === layer ? "bg-signal text-[#02131f]" : "text-mist hover:bg-panelAlt hover:text-signal"}`} key={layer} onClick={() => onLayerChange(layer)} type="button">
+                    <button
+                        className={`px-2.5 py-1.5 text-[9px] font-semibold uppercase tracking-[.1em] transition-colors ${
+                            activeLayer === layer
+                                ? "bg-[#0d2235] text-[#00d4ff]"
+                                : "text-[#5a7d96] hover:bg-[#0a1c2c] hover:text-[#7ab8d0]"
+                        }`}
+                        key={layer}
+                        onClick={() => onLayerChange(layer)}
+                        type="button"
+                    >
                         {layer}
                     </button>
                 ))}
-            </div>
-            <div className="pointer-events-none absolute bottom-5 left-5 z-10 rounded-sm border border-[#31516a] bg-[#061624]/95 px-3 py-2 font-mono text-[10px] text-[#9ed7eb]">
-                {analysis ? (
-                    <>
-                        <b>{analysis.detection.centroid_latlon.lat.toFixed(2)}°N</b><span className="mx-2 text-mist">/</span><b>{analysis.detection.centroid_latlon.lon.toFixed(2)}°E</b>
-                    </>
-                ) : (
-                    <span className="text-mist">Loading location...</span>
-                )}
             </div>
         </section>
     );

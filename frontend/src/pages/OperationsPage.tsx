@@ -218,6 +218,7 @@ export function OperationsPage() {
                             isIdentifying={identifyLoading}
                             identifyRun={identifyRun}
                             identified={identified}
+                            onVesselSelect={setSelectedSuspectId}
                         /><VesselWatchlist /></div><InvestigationPanel
                             activeTab={activeTab}
                             onTabChange={setActiveTab}

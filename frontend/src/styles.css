@@ -96,40 +96,44 @@ button:focus-visible {
     text-transform: uppercase;
 }
 
-/* MapLibre overrides for dark theme */
+/* MapLibre overrides for dark maritime theme */
 .maplibregl-ctrl-attrib {
     background: rgba(2, 11, 20, 0.85) !important;
     color: #5a7d96 !important;
-    font-size: 9px !important;
-    padding: 2px 6px !important;
-    border-top-left-radius: 4px !important;
+    font-size: 8px !important;
+    padding: 1px 5px !important;
+    border-top-left-radius: 3px !important;
 }
 
 .maplibregl-ctrl-attrib a {
     color: #00d4ff !important;
 }
 
-.maplibregl-ctrl-group button {
-    background: #0a1c2c !important;
+.maplibregl-ctrl-group {
     border: 1px solid #1e3a52 !important;
-    color: #e8f0f5 !important;
-    width: 32px !important;
-    height: 32px !important;
+    border-radius: 3px !important;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5) !important;
+}
+
+.maplibregl-ctrl-group button {
+    background: #020b14 !important;
+    border-bottom: 1px solid #1e3a52 !important;
+    color: #7ab8d0 !important;
+    width: 28px !important;
+    height: 28px !important;
 }
 
 .maplibregl-ctrl-group button:hover {
-    background: #0d2235 !important;
+    background: #0a1c2c !important;
     border-color: #00d4ff !important;
 }
 
 .maplibregl-ctrl-group button span {
-    filter: invert(1) !important;
+    filter: invert(0.7) sepia(1) saturate(2) hue-rotate(160deg) !important;
 }
 
-.maplibregl-ctrl-zoom-in,
-.maplibregl-ctrl-zoom-out {
-    width: 32px !important;
-    height: 32px !important;
+.maplibregl-ctrl-group button + button {
+    border-top: 1px solid #1e3a52 !important;
 }
 
 .maplibregl-popup-content {
