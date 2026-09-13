@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import { InvestigationPanel } from "../components/investigation/InvestigationPanel";
 import { IncidentRail } from "../components/incidents/IncidentRail";
@@ -15,7 +15,7 @@ type VesselRecord = { id: number; name: string; vessel_type?: string | null; fla
 
 export function OperationsPage() {
     const [activeSection, setActiveSection] = useState("Overview");
-    const [activeLayer, setActiveLayer] = useState("Satellite");
+    const [activeLayer, setActiveLayer] = useState("Map");
     const [activeTab, setActiveTab] = useState("Overview");
     const [aisTracks, setAisTracks] = useState<AisTrack[]>([]);
     const [suspects, setSuspects] = useState<SuspectCandidate[]>([]);
@@ -26,6 +26,8 @@ export function OperationsPage() {
     const [analysis, setAnalysis] = useState<SpillAnalysis | null>(null);
     const [alphaSurface, setAlphaSurface] = useState<AlphaSurfaceResponse | null>(null);
     const [custodesStatus, setCustodesStatus] = useState<CustodesStatusResponse | null>(null);
+    const [identified, setIdentified] = useState(false);
+    const [identifiedAt, setIdentifiedAt] = useState<string | null>(null);
     const [identifyLoading, setIdentifyLoading] = useState(false);
     const [identifyError, setIdentifyError] = useState(false);
     const [identifyRun, setIdentifyRun] = useState(0);
@@ -39,38 +41,32 @@ export function OperationsPage() {
         if (identifyLoading) return;
         setIdentifyLoading(true);
         setIdentifyError(false);
-        // Each click is a new animation run: MapView replays the winner flight on every run token.
+        // Clear previous identification state so stale values are not shown while re-running
+        setIdentified(false);
+        setIdentifiedAt(null);
+        setCustodesStatus(null);
+        setAlphaSurface(null);
+        setSelectedSuspectId(null);
+        // Each click is a new animation run for the AIS web -> fade sequence
         setIdentifyRun((run) => run + 1);
+        if (aisTracks.length < 20) {
+            loadAllVesselTracks();
+        }
         Promise.all([getAlphaSurface(selectedSpillId), getCustodesStatus(selectedSpillId)])
             .then(([surface, status]) => {
                 setAlphaSurface(surface);
                 setCustodesStatus(status);
-                // Ensure the CAW winning vessel's AIS track is loaded so the gold highlight and the
-                // hindcast-origin animation can render without the user having visited "AIS Analysis".
+                setIdentified(true);
+                setIdentifiedAt(new Date().toISOString());
                 const winnerId = status.top_vessel;
-                if (winnerId !== null && !aisTracks.some((track) => track.vesselId === winnerId)) {
-                    fetch(`${API_BASE_URL}/vessels/${winnerId}/track`)
-                        .then((response) => {
-                            if (!response.ok) throw new Error("Vessel track unavailable");
-                            return response.json();
-                        })
-                        .then((track: { points?: AisTrack["points"] }) => {
-                            const points = track.points;
-                            if (!points?.length) return;
-                            const winnerName = suspects.find((candidate) => candidate.vessel_id === winnerId)?.vessel_name ?? `Vessel ${winnerId}`;
-                            setAisTracks((prevTracks) => {
-                                if (prevTracks.some((t) => t.vesselId === winnerId)) return prevTracks;
-                                return [...prevTracks, { vesselId: winnerId, vesselName: winnerName, vesselType: null, flag: null, points }];
-                            });
-                        })
-                        .catch(() => {
-                            // Leave existing tracks as-is; identification result and panel stay usable.
-                        });
+                if (winnerId !== null) {
+                    setSelectedSuspectId(winnerId);
                 }
             })
             .catch(() => {
                 setAlphaSurface(null);
                 setCustodesStatus(null);
+                setIdentifiedAt(null);
                 setIdentifyError(true);
             })
             .finally(() => {
@@ -108,7 +104,8 @@ export function OperationsPage() {
             .then((data) => {
                 if (!cancelled) {
                     setSuspects(data);
-                    setSelectedSuspectId(data[0]?.vessel_id ?? null);
+                    // Do not auto-select suspect before identification
+                    setSelectedSuspectId(null);
                 }
             })
             .catch(() => {
@@ -122,46 +119,12 @@ export function OperationsPage() {
                 if (!cancelled) setSuspectsLoading(false);
             });
 
-        // Preload CAW & Custodes intelligence
-        Promise.all([getAlphaSurface(selectedSpillId), getCustodesStatus(selectedSpillId)])
-            .then(([surface, status]) => {
-                if (!cancelled) {
-                    setAlphaSurface(surface);
-                    setCustodesStatus(status);
-                    const winnerId = status.top_vessel;
-                    if (winnerId !== null) {
-                        fetch(`${API_BASE_URL}/vessels/${winnerId}/track`)
-                            .then((r) => (r.ok ? r.json() : null))
-                            .then((track) => {
-                                if (track?.points?.length && !cancelled) {
-                                    setAisTracks((prev) => {
-                                        if (prev.some((t) => t.vesselId === winnerId)) return prev;
-                                        return [
-                                            ...prev,
-                                            {
-                                                vesselId: winnerId,
-                                                vesselName: `Vessel ${winnerId}`,
-                                                vesselType: null,
-                                                flag: null,
-                                                points: track.points,
-                                            },
-                                        ];
-                                    });
-                                }
-                            })
-                            .catch(() => {});
-                    }
-                }
-            })
-            .catch(() => {});
-
         return () => {
             cancelled = true;
         };
     }, []);
 
-    useEffect(() => {
-        if (activeTab !== "AIS Analysis") return;
+    const loadAllVesselTracks = useCallback(() => {
         let cancelled = false;
         fetch(`${API_BASE_URL}/vessels/`)
             .then((response) => response.json() as Promise<VesselRecord[]>)
@@ -181,7 +144,12 @@ export function OperationsPage() {
         return () => {
             cancelled = true;
         };
-    }, [activeTab]);
+    }, []);
+
+    useEffect(() => {
+        const cleanup = loadAllVesselTracks();
+        return cleanup;
+    }, [loadAllVesselTracks]);
 
     useEffect(() => {
         if (activeTab !== "Timeline") return;
@@ -233,8 +201,8 @@ export function OperationsPage() {
         };
     }, [selectedSuspectId, suspects]);
 
-    const winningVesselId = custodesStatus?.top_vessel ?? null;
-    const identified = alphaSurface !== null && custodesStatus !== null && !identifyError;
+    const isAbstain = custodesStatus?.decision === "ABSTAIN" || custodesStatus?.top_vessel === null;
+    const winningVesselId = (identified && !isAbstain) ? (custodesStatus?.top_vessel ?? null) : null;
     const cawActive = identified && winningVesselId !== null;
 
     const kpis = [["Active spills", "01", "Elevated"], ["Total area", analysis ? `${analysis.detection.physical_area_km2.toFixed(2)} km²` : "—", "Current incident"], ["Monitored vessels", "148", "AIS coverage"], ["Alerts", "03", "2 unread"]];
@@ -249,38 +217,9 @@ export function OperationsPage() {
             {activeSection === "Alerts" ? (
                 <AlertsPage onOpenAlert={handleAlertOpen} />
             ) : (
-                <main className="flex min-w-0 flex-1 flex-col overflow-hidden bg-[#020912]">
-                    {/* Compact Tactical Telemetry Sub-Header */}
-                    <div className="flex shrink-0 items-center justify-between border-b border-[#1b344b] bg-[#030d17] px-4 py-2 text-[10px]">
-                        <div className="flex items-center gap-3">
-                            <span className="flex items-center gap-1.5 font-bold uppercase tracking-wider text-[#00d4ff]">
-                                <span className="h-1.5 w-1.5 rounded-full bg-[#00d4ff] animate-pulse" />
-                                Arabian Sea Sector
-                            </span>
-                            <span className="text-[#334e68]">|</span>
-                            <span className="text-[#62859e]">Sector Grid:</span>
-                            <span className="font-mono text-[#cbd5e1]">75°E - 77°E / 08°N - 11°N</span>
-                        </div>
-                        <div className="hidden items-center gap-5 sm:flex">
-                            <div>
-                                <span className="text-[#62859e]">Active Spill: </span>
-                                <span className="font-mono font-bold text-[#f97316]">MS-001 (19.77 km²)</span>
-                            </div>
-                            <div className="h-3 w-px bg-[#1b344b]" />
-                            <div>
-                                <span className="text-[#62859e]">Fleet AIS: </span>
-                                <span className="font-mono text-[#cbd5e1]">148 Contacts</span>
-                            </div>
-                            <div className="h-3 w-px bg-[#1b344b]" />
-                            <div>
-                                <span className="text-[#62859e]">Decision Engine: </span>
-                                <span className="font-mono font-semibold text-[#10b981]">CAW / Custodes</span>
-                            </div>
-                        </div>
-                    </div>
-
+                <main className="flex min-w-0 flex-1 flex-col overflow-hidden bg-[#020813]">
                     {/* Main Operations 3-Column Dashboard Cards */}
-                    <div className="flex min-h-0 min-w-0 flex-1 gap-3 p-3 overflow-hidden bg-[#030d17]">
+                    <div className="flex min-h-0 min-w-0 flex-1 gap-3 p-3 overflow-hidden bg-[#020813]">
                         {/* 1. Left Card: Incident Overview */}
                         <IncidentRail
                             analysis={analysis}
@@ -290,22 +229,27 @@ export function OperationsPage() {
                             identifyError={identifyError}
                             custodes={custodesStatus}
                             alphaSurface={alphaSurface}
+                            identifiedAt={identifiedAt}
                         />
 
                         {/* 2. Center Card: Tactical Map Workspace */}
-                        <div className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-xl border border-[#15293e] bg-[#071322] shadow-2xl">
+                        <div className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-xl border border-[#162c44] bg-[#040d1a] shadow-2xl">
                             <MapSurface
                                 activeLayer={activeLayer}
                                 onLayerChange={setActiveLayer}
                                 investigationTab={activeTab}
+                                onTabChange={setActiveTab}
                                 aisTracks={aisTracks}
                                 highlightedVesselId={selectedSuspectId}
                                 analysis={analysis}
                                 cawActive={cawActive}
                                 winningVesselId={winningVesselId}
+                                decision={custodesStatus?.decision}
                                 isIdentifying={identifyLoading}
                                 identifyRun={identifyRun}
                                 identified={identified}
+                                alphaSurface={alphaSurface}
+                                suspects={suspects}
                                 onVesselSelect={setSelectedSuspectId}
                             />
                         </div>
@@ -330,7 +274,6 @@ export function OperationsPage() {
                             winningVesselId={winningVesselId}
                         />
                     </div>
-                    <TimelineBar />
                 </main>
             )}
         </AppShell>

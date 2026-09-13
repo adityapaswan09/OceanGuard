@@ -58,6 +58,11 @@ export interface SpillAnalysis {
         prior: number;
         score: number;
     };
+    map_hypothesis?: {
+        origin_lon: number;
+        origin_lat: number;
+        [key: string]: any;
+    };
     forward_forecast_centroid_lonlat: { lon: number; lat: number };
     age_estimate_hours: number;
     // Optional new fields exported by Sakshi fixture
@@ -107,4 +112,6 @@ export interface CustodesStatusResponse {
     abstain_flag: boolean | null;
     null_alpha: number | null;
 }
+
+export const CUSTODES_CHECKPOINT_PRECISION = "93.9% held-out precision";
 

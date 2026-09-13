@@ -5,7 +5,7 @@ import "maplibre-gl/dist/maplibre-gl.css";
 import type { FeatureCollection, Geometry } from "geojson";
 
 import { API_BASE_URL } from "../../services/api";
-import type { AisTrack, SpillAnalysis } from "../../types/intelligence";
+import type { AisTrack, AlphaSurfaceResponse, CustodesDecision, SpillAnalysis, SuspectCandidate } from "../../types/intelligence";
 
 type RegionRecord = {
     id: number;
@@ -25,10 +25,23 @@ interface MapViewProps {
     analysis?: SpillAnalysis | null;
     cawActive?: boolean;
     winningVesselId?: number | null;
+    decision?: CustodesDecision | null;
     isIdentifying?: boolean;
     identifyRun?: number;
     identified?: boolean;
+    alphaSurface?: AlphaSurfaceResponse | null;
+    suspects?: SuspectCandidate[];
     onVesselSelect?: (vesselId: number) => void;
+    onCoordsUpdate?: (coords: { lon: number; lat: number } | null) => void;
+    onMapReady?: (map: MapLibreMap) => void;
+    layerVisibility?: {
+        spill?: boolean;
+        attributionAlpha?: boolean;
+        hindcast?: boolean;
+        forecast?: boolean;
+        ais?: boolean;
+        graticule?: boolean;
+    };
 }
 
 const emptyCollection: FeatureCollection = {
@@ -36,9 +49,50 @@ const emptyCollection: FeatureCollection = {
     features: [],
 };
 
-const publicRasterStyle = {
+// Generate graticule lines for tactical maritime GIS display
+function generateGraticule(): FeatureCollection {
+    const features: any[] = [];
+    // Meridians (Longitude: 72°E to 78°E)
+    for (let lon = 72; lon <= 78; lon += 1) {
+        features.push({
+            type: "Feature",
+            geometry: {
+                type: "LineString",
+                coordinates: [[lon, 7.0], [lon, 13.0]],
+            },
+            properties: { label: `${lon}°E`, type: "meridian" },
+        });
+    }
+    // Parallels (Latitude: 7°N to 13°N)
+    for (let lat = 7; lat <= 13; lat += 1) {
+        features.push({
+            type: "Feature",
+            geometry: {
+                type: "LineString",
+                coordinates: [[72.0, lat], [78.0, lat]],
+            },
+            properties: { label: `${lat}°N`, type: "parallel" },
+        });
+    }
+    return { type: "FeatureCollection", features };
+}
+
+const graticuleData = generateGraticule();
+
+// Professional Maritime Dual Basemap:
+// - esriDarkGray for high-contrast nautical "Map" view (no API key required)
+// - esriSatellite for high-res orbital "Satellite" view (no API key required)
+const maritimeMapStyle = {
     version: 8 as const,
     sources: {
+        esriDarkGray: {
+            type: "raster" as const,
+            tiles: [
+                "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}",
+            ],
+            tileSize: 256,
+            attribution: "Tiles © Esri",
+        },
         esriSatellite: {
             type: "raster" as const,
             tiles: ["https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"],
@@ -46,7 +100,21 @@ const publicRasterStyle = {
             attribution: "Tiles © Esri",
         },
     },
-    layers: [{ id: "esri-satellite", type: "raster" as const, source: "esriSatellite" }],
+    layers: [
+        {
+            id: "esri-dark-gray",
+            type: "raster" as const,
+            source: "esriDarkGray",
+            paint: { "raster-opacity": 0.95 },
+        },
+        {
+            id: "esri-satellite",
+            type: "raster" as const,
+            source: "esriSatellite",
+            paint: { "raster-opacity": 0.95 },
+            layout: { visibility: "none" as const },
+        },
+    ],
 };
 
 function asFeatureCollection(geometry: Geometry | undefined, properties: Record<string, unknown>): FeatureCollection {
@@ -55,76 +123,399 @@ function asFeatureCollection(geometry: Geometry | undefined, properties: Record<
         : emptyCollection;
 }
 
-function regionCenter(geometry: Geometry): [number, number] {
-    if (geometry.type === "Polygon") return geometry.coordinates[0][0] as [number, number];
-    if (geometry.type === "MultiPolygon") return geometry.coordinates[0][0][0] as [number, number];
-    if (geometry.type === "Point") return geometry.coordinates as [number, number];
-    return [75.77, 9.5];
+// Generate concentric contour diffusion rings for realistic multi-band oil spill representation
+function generateSpillContours(
+    polygonCoords: [number, number][],
+    centroid: [number, number]
+): FeatureCollection {
+    if (!polygonCoords || polygonCoords.length < 3) return emptyCollection;
+
+    const [cLon, cLat] = centroid;
+    // Restrained, crisp spill boundary and dense core underneath other layers
+    const contourLevels = [
+        { level: 2, scale: 1.0, color: "#ef4444", stroke: "#f87171", opacity: 0.35, strokeOpacity: 0.85 },
+        { level: 1, scale: 0.75, color: "#dc2626", stroke: "#ef4444", opacity: 0.55, strokeOpacity: 0.9 },
+    ];
+
+    const features: any[] = [];
+    for (const conf of contourLevels) {
+        const scaledRing = polygonCoords.map(([lon, lat]) => [
+            cLon + (lon - cLon) * conf.scale,
+            cLat + (lat - cLat) * conf.scale,
+        ]);
+        if (
+            scaledRing.length > 0 &&
+            (scaledRing[0][0] !== scaledRing[scaledRing.length - 1][0] ||
+                scaledRing[0][1] !== scaledRing[scaledRing.length - 1][1])
+        ) {
+            scaledRing.push([...scaledRing[0]]);
+        }
+        features.push({
+            type: "Feature",
+            geometry: {
+                type: "Polygon",
+                coordinates: [scaledRing],
+            },
+            properties: {
+                level: conf.level,
+                fillColor: conf.color,
+                strokeColor: conf.stroke,
+                fillOpacity: conf.opacity,
+                strokeOpacity: conf.strokeOpacity,
+            },
+        });
+    }
+
+    return { type: "FeatureCollection", features };
 }
 
-// All map layers created once in declaration order with strict visual hierarchy:
-// PRIMARY: Detected Oil Spill (Alert red-orange)
-// SECONDARY: Hindcast origin (Sky blue) & Forecast dispersion envelope (Cyan)
-// TERTIARY: AIS vessel tracks & fleet markers (Subtle slate-navy)
-// WINNER: Golden/amber highlighted vessel trajectory
+// Tactical layer specifications organized by visual hierarchy:
+// 1. Basemap (ESRI dark-gray / satellite canvas)
+// 2. Graticule coordinate lines
+// 3. CAW Attribution Alpha Heatmap (smooth GPU intensity field)
+// 4. Spill detection footprint (restrained fill & subtle outline - underneath trajectories/tracks)
+// 5. Forecast 24h dispersion trajectory & uncertainty envelope
+// 6. AIS fleet tracks (tactical thin dashed blue #3b82f6)
+// 7. Hindcast origin-to-spill trajectory (dashed #0284c7)
+// 8. CAW Winner golden approach path & amber accent
+// 9. Spill centroid tactical core dot
+// 10. AIS directional vessel markers
 const STATIC_LAYERS: Array<{ id: string; spec: maplibregl.LayerSpecification }> = [
-    { id: "region-fill", spec: { id: "region-fill", type: "fill", source: "region", paint: { "fill-color": "#061a2b", "fill-opacity": 0.08 } } },
-    { id: "region-line", spec: { id: "region-line", type: "line", source: "region", paint: { "line-color": "#1b3852", "line-width": 1, "line-opacity": 0.4 } } },
-    // PRIMARY: Oil Spill Slick
-    { id: "spill-fill", spec: { id: "spill-fill", type: "fill", source: "spill-polygon", paint: { "fill-color": "#dc2626", "fill-opacity": 0.35 } } },
-    { id: "spill-outline", spec: { id: "spill-outline", type: "line", source: "spill-polygon", paint: { "line-color": "#f97316", "line-width": 2, "line-opacity": 0.9, "line-dasharray": [3, 2] } } },
-    { id: "spill-centroid-ring", spec: { id: "spill-centroid-ring", type: "circle", source: "spill-centroid", paint: { "circle-color": "#ef4444", "circle-radius": 14, "circle-stroke-color": "#ef4444", "circle-stroke-width": 1.5, "circle-opacity": 0.2, "circle-blur": 0 } } },
-    { id: "spill-centroid", spec: { id: "spill-centroid", type: "circle", source: "spill-centroid", paint: { "circle-color": "#ef4444", "circle-radius": 5.5, "circle-stroke-color": "#ffffff", "circle-stroke-width": 2, "circle-opacity": 1 } } },
-    { id: "spill-label", spec: { id: "spill-label", type: "symbol", source: "spill-label", layout: { "text-field": ["get", "label"], "text-size": 10, "text-anchor": "left", "text-offset": [1.1, 0], "text-allow-overlap": true, "text-letter-spacing": 0.06 }, paint: { "text-color": "#fed7aa", "text-halo-color": "#020912", "text-halo-width": 2 } } },
-    // SECONDARY: Hindcast Origin
-    { id: "hindcast-reference-line", spec: { id: "hindcast-reference-line", type: "line", source: "hindcast-origin-reference", paint: { "line-color": "#0284c7", "line-width": 1.4, "line-opacity": 0.7, "line-dasharray": [4, 3] } } },
-    { id: "hindcast-origin-ring", spec: { id: "hindcast-origin-ring", type: "circle", source: "hindcast-origin-marker", paint: { "circle-color": "#0284c7", "circle-radius": 13, "circle-stroke-color": "#0284c7", "circle-stroke-width": 1.5, "circle-opacity": 0.2, "circle-blur": 0 } } },
-    { id: "hindcast-origin-marker", spec: { id: "hindcast-origin-marker", type: "circle", source: "hindcast-origin-marker", paint: { "circle-color": "#0284c7", "circle-radius": 6.5, "circle-stroke-color": "#e0f2fe", "circle-stroke-width": 2, "circle-opacity": 0.95 } } },
-    { id: "hindcast-origin-label", spec: { id: "hindcast-origin-label", type: "symbol", source: "hindcast-origin-label", layout: { "text-field": ["get", "label"], "text-size": 9, "text-anchor": "left", "text-offset": [1.1, 0], "text-allow-overlap": true, "text-letter-spacing": 0.05 }, paint: { "text-color": "#bae6fd", "text-halo-color": "#020912", "text-halo-width": 2 } } },
-    // SECONDARY: Forecast 24h Dispersion & Uncertainty Envelope
-    { id: "forecast-envelope-fill", spec: { id: "forecast-envelope-fill", type: "fill", source: "forecast-envelope", paint: { "fill-color": "#06b6d4", "fill-opacity": 0.16 } } },
-    { id: "forecast-envelope-outline", spec: { id: "forecast-envelope-outline", type: "line", source: "forecast-envelope", paint: { "line-color": "#06b6d4", "line-width": 1.5, "line-opacity": 0.75, "line-dasharray": [3, 2] } } },
-    { id: "forecast-centroid-ring", spec: { id: "forecast-centroid-ring", type: "circle", source: "forecast-centroid", paint: { "circle-color": "#22d4ee", "circle-radius": 13, "circle-stroke-color": "#22d4ee", "circle-stroke-width": 1.5, "circle-opacity": 0.2, "circle-blur": 0 } } },
-    { id: "forecast-centroid", spec: { id: "forecast-centroid", type: "circle", source: "forecast-centroid", paint: { "circle-color": "#22d4ee", "circle-radius": 6, "circle-stroke-color": "#cffafe", "circle-stroke-width": 2, "circle-opacity": 0.95 } } },
-    { id: "forecast-centroid-label", spec: { id: "forecast-centroid-label", type: "symbol", source: "forecast-centroid-label", layout: { "text-field": ["get", "label"], "text-size": 9, "text-anchor": "left", "text-offset": [1.1, 0], "text-allow-overlap": true, "text-letter-spacing": 0.05 }, paint: { "text-color": "#a5f3fc", "text-halo-color": "#020912", "text-halo-width": 2 } } },
-    // TERTIARY: AIS Fleet Tracks & Markers (Subtle, unobtrusive)
-    { id: "ais-vessel-tracks", spec: { id: "ais-vessel-tracks", type: "line", source: "ais-vessel-tracks", paint: { "line-color": "#475569", "line-width": 1.2, "line-opacity": 0.5 } } },
-    { id: "ais-vessel-markers", spec: { id: "ais-vessel-markers", type: "circle", source: "ais-vessel-markers", paint: { "circle-color": "#334155", "circle-radius": 3.5, "circle-stroke-color": "rgba(148, 163, 184, 0.6)", "circle-stroke-width": 1, "circle-opacity": 0.75 } } },
+    // Graticule Grid
+    {
+        id: "graticule-lines",
+        spec: {
+            id: "graticule-lines",
+            type: "line",
+            source: "graticule",
+            paint: {
+                "line-color": "#0c2c47",
+                "line-width": 0.8,
+                "line-dasharray": [2, 4],
+                "line-opacity": 0.65,
+            },
+        },
+    },
+    // Region boundaries
+    { id: "region-fill", spec: { id: "region-fill", type: "fill", source: "region", paint: { "fill-color": "#041424", "fill-opacity": 0.05 } } },
+    { id: "region-line", spec: { id: "region-line", type: "line", source: "region", paint: { "line-color": "#15334d", "line-width": 1, "line-opacity": 0.4 } } },
+
+    // CAW ATTRIBUTION ALPHA HEATMAP (Layer Order #3)
+    {
+        id: "attribution-alpha-heatmap",
+        spec: {
+            id: "attribution-alpha-heatmap",
+            type: "heatmap",
+            source: "attribution-alpha",
+            paint: {
+                "heatmap-weight": [
+                    "interpolate",
+                    ["linear"],
+                    ["get", "alpha"],
+                    0, 0,
+                    0.2, 0.25,
+                    0.5, 0.6,
+                    1, 1,
+                ],
+                "heatmap-intensity": [
+                    "interpolate",
+                    ["linear"],
+                    ["zoom"],
+                    0, 1,
+                    8, 2.2,
+                    12, 3.5,
+                ],
+                "heatmap-color": [
+                    "interpolate",
+                    ["linear"],
+                    ["heatmap-density"],
+                    0, "rgba(0, 0, 0, 0)",
+                    0.15, "rgba(2, 44, 75, 0.4)",
+                    0.3, "rgba(2, 132, 199, 0.65)",
+                    0.5, "rgba(6, 182, 212, 0.8)",
+                    0.7, "rgba(234, 179, 8, 0.88)",
+                    0.85, "rgba(249, 115, 22, 0.94)",
+                    1.0, "rgba(239, 68, 68, 0.98)",
+                ],
+                "heatmap-radius": [
+                    "interpolate",
+                    ["linear"],
+                    ["zoom"],
+                    4, 20,
+                    8, 42,
+                    11, 75,
+                    14, 120,
+                ],
+                "heatmap-opacity": 0.82,
+            },
+        },
+    },
+
+    // SPILL DETECTION FOOTPRINT (Layer Order #4: visible underneath tracks & trajectories)
+    {
+        id: "spill-contours-fill",
+        spec: {
+            id: "spill-contours-fill",
+            type: "fill",
+            source: "spill-contours",
+            paint: {
+                "fill-color": ["get", "fillColor"],
+                "fill-opacity": ["get", "fillOpacity"],
+            },
+        },
+    },
+    {
+        id: "spill-contours-line",
+        spec: {
+            id: "spill-contours-line",
+            type: "line",
+            source: "spill-contours",
+            paint: {
+                "line-color": ["get", "strokeColor"],
+                "line-width": ["case", ["==", ["get", "level"], 2], 1.8, 1.2],
+                "line-opacity": ["get", "strokeOpacity"],
+            },
+        },
+    },
+
+    // FORECAST 24H DISPERSION & UNCERTAINTY ENVELOPE (Layer Order #5)
+    {
+        id: "forecast-envelope-fill",
+        spec: {
+            id: "forecast-envelope-fill",
+            type: "fill",
+            source: "forecast-envelope",
+            paint: { "fill-color": "#06b6d4", "fill-opacity": 0.12 },
+        },
+    },
+    {
+        id: "forecast-envelope-outline",
+        spec: {
+            id: "forecast-envelope-outline",
+            type: "line",
+            source: "forecast-envelope",
+            paint: {
+                "line-color": "#06b6d4",
+                "line-width": 1.5,
+                "line-opacity": 0.8,
+                "line-dasharray": [3, 2],
+            },
+        },
+    },
+    {
+        id: "forecast-trajectory-line",
+        spec: {
+            id: "forecast-trajectory-line",
+            type: "line",
+            source: "forecast-trajectory",
+            paint: {
+                "line-color": "#22d4ee",
+                "line-width": 1.6,
+                "line-opacity": 0.75,
+                "line-dasharray": [4, 3],
+            },
+        },
+    },
+
+    // AIS CANDIDATE FLEET TRACKS (Layer Order #6)
+    {
+        id: "ais-vessel-tracks",
+        spec: {
+            id: "ais-vessel-tracks",
+            type: "line",
+            source: "ais-vessel-tracks",
+            paint: {
+                "line-color": "#3b82f6",
+                "line-width": 1.2,
+                "line-opacity": 1.0,
+                "line-dasharray": [3, 3],
+            },
+            layout: {
+                "line-join": "round",
+                "line-cap": "round",
+            },
+        },
+    },
+    {
+        id: "ais-vessel-tracks-winner",
+        spec: {
+            id: "ais-vessel-tracks-winner",
+            type: "line",
+            source: "ais-vessel-tracks",
+            paint: {
+                "line-color": "#3b82f6",
+                "line-width": 1.4,
+                "line-opacity": 1.0,
+                "line-dasharray": [3, 3],
+            },
+            layout: {
+                "line-join": "round",
+                "line-cap": "round",
+            },
+            filter: ["==", ["get", "vesselId"], -1],
+        },
+    },
+
+    // HINDCAST ORIGIN TO SPILL CENTROID TRAJECTORY (Layer Order #7)
+    {
+        id: "hindcast-trajectory-line",
+        spec: {
+            id: "hindcast-trajectory-line",
+            type: "line",
+            source: "hindcast-trajectory",
+            paint: {
+                "line-color": "#0284c7",
+                "line-width": 1.6,
+                "line-opacity": 0.85,
+                "line-dasharray": [4, 3],
+            },
+        },
+    },
+
+    // CAW WINNER GOLDEN AIS TRACE (Layer Order #8)
+    {
+        id: "caw-winner-glow",
+        spec: {
+            id: "caw-winner-glow",
+            type: "line",
+            source: "caw-approach-line",
+            paint: {
+                "line-color": "#F59E0B",
+                "line-width": 6,
+                "line-opacity": 0.25,
+                "line-blur": 2,
+            },
+            layout: {
+                "line-join": "round",
+                "line-cap": "round",
+            },
+        },
+    },
+    {
+        id: "caw-winner-path",
+        spec: {
+            id: "caw-winner-path",
+            type: "line",
+            source: "caw-approach-line",
+            paint: {
+                "line-color": "#F59E0B",
+                "line-width": 2.8,
+                "line-opacity": 1.0,
+            },
+            layout: {
+                "line-join": "round",
+                "line-cap": "round",
+            },
+        },
+    },
+    // CAW WINNER WAYPOINT DOTS (Layer Order #8)
+    {
+        id: "caw-winner-waypoints",
+        spec: {
+            id: "caw-winner-waypoints",
+            type: "circle",
+            source: "caw-winner-marker",
+            paint: {
+                "circle-color": "#F59E0B",
+                "circle-radius": 3.5,
+                "circle-opacity": 1.0,
+                "circle-stroke-color": "#ffffff",
+                "circle-stroke-width": 1,
+            },
+        },
+    },
+
+    // SPILL CENTROID CORE DOT (Layer Order #9)
+    {
+        id: "spill-centroid-glow",
+        spec: {
+            id: "spill-centroid-glow",
+            type: "circle",
+            source: "spill-centroid",
+            paint: {
+                "circle-color": "#ef4444",
+                "circle-radius": 4.5,
+                "circle-stroke-color": "#ffffff",
+                "circle-stroke-width": 1.5,
+                "circle-opacity": 1.0,
+            },
+        },
+    },
+
+    // AIS VESSEL DIRECTIONAL MARKERS (Layer Order #10)
+    {
+        id: "ais-vessel-markers",
+        spec: {
+            id: "ais-vessel-markers",
+            type: "circle",
+            source: "ais-vessel-markers",
+            paint: {
+                "circle-color": "#f97316",
+                "circle-radius": 3.5,
+                "circle-stroke-color": "rgba(255, 255, 255, 0.85)",
+                "circle-stroke-width": 1.2,
+                "circle-opacity": 0.9,
+            },
+        },
+    },
 ];
 
-const ALL_LAYER_IDS = STATIC_LAYERS.map((l) => l.id);
 const ALL_SOURCE_IDS = [
-    "region", "spill-polygon", "spill-centroid", "spill-label",
-    "hindcast-origin-marker", "hindcast-origin-label", "hindcast-origin-reference",
-    "forecast-centroid", "forecast-centroid-label", "forecast-envelope",
-    "ais-vessel-tracks", "ais-vessel-markers",
+    "graticule",
+    "region",
+    "attribution-alpha",
+    "spill-contours",
+    "spill-centroid",
+    "hindcast-trajectory",
+    "forecast-trajectory",
+    "forecast-envelope",
+    "ais-vessel-tracks",
+    "ais-vessel-markers",
+    "caw-approach-line",
+    "caw-winner-marker",
 ];
 
 export function MapView({
-    activeLayer = "Satellite",
+    activeLayer = "Map",
     investigationTab = "Overview",
     aisTracks = [],
     highlightedVesselId = null,
     analysis = null,
     cawActive = false,
     winningVesselId = null,
+    decision = null,
     isIdentifying = false,
     identifyRun = 0,
     identified = false,
+    alphaSurface = null,
+    suspects = [],
     onVesselSelect,
+    onCoordsUpdate,
+    onMapReady,
+    layerVisibility,
 }: MapViewProps) {
     const containerRef = useRef<HTMLDivElement | null>(null);
     const mapRef = useRef<MapLibreMap | null>(null);
     const layersInitializedRef = useRef(false);
     const clickHandlerRef = useRef<((e: maplibregl.MapMouseEvent & { features?: maplibregl.MapGeoJSONFeature[] }) => void) | null>(null);
+
+    // Callout HTML marker references
+    const originMarkerRef = useRef<maplibregl.Marker | null>(null);
+    const winnerMarkerRef = useRef<maplibregl.Marker | null>(null);
+    const abstainMarkerRef = useRef<maplibregl.Marker | null>(null);
+    const forecastMarkerRef = useRef<maplibregl.Marker | null>(null);
+
     const [region, setRegion] = useState<RegionRecord | null>(null);
     const [spillId, setSpillId] = useState<number | null>(null);
     const [loadError, setLoadError] = useState(false);
-    const [cursorCoords, setCursorCoords] = useState<{ lon: number; lat: number } | null>(null);
-    const animationStateRef = useRef<{ runId: number | null; frameId: number | null; hasPlayed: boolean }>({ runId: null, frameId: null, hasPlayed: false });
-    const spillFocusRunRef = useRef(0);
+    const aisAnimationRef = useRef<{
+        animatedRunId: number | null;
+        timerId: number | null;
+        frameId: number | null;
+    }>({ animatedRunId: null, timerId: null, frameId: null });
+    const hasFlownRef = useRef(false);
 
-    // --- Fetch region + spill metadata ---
+    // Fetch region + spill metadata
     useEffect(() => {
         let cancelled = false;
         Promise.all([
@@ -134,7 +525,7 @@ export function MapView({
             .then(([regions, spills]) => {
                 if (cancelled) return;
                 setRegion(regions[0] ?? null);
-                setSpillId(spills.items[0]?.id ?? null);
+                setSpillId(spills.items[0]?.id ?? 1);
             })
             .catch(() => {
                 if (!cancelled) setLoadError(true);
@@ -142,30 +533,31 @@ export function MapView({
         return () => { cancelled = true; };
     }, []);
 
-    // --- Initialize map once ---
+    // Initialize map once
     useEffect(() => {
         if (!containerRef.current || mapRef.current) return;
 
         const map = new maplibregl.Map({
             container: containerRef.current,
-            style: publicRasterStyle,
-            center: [75.77, 9.5],
-            zoom: 7.5,
+            style: maritimeMapStyle,
+            center: [75.35, 9.25],
+            zoom: 7.6,
             attributionControl: { compact: true },
         });
         mapRef.current = map;
+        onMapReady?.(map);
 
-        // Track live coordinates on hover
+        // Mouse hover telemetry
         const handleMouseMove = (e: maplibregl.MapMouseEvent) => {
-            setCursorCoords({ lon: e.lngLat.lng, lat: e.lngLat.lat });
+            onCoordsUpdate?.({ lon: e.lngLat.lng, lat: e.lngLat.lat });
         };
         const handleMouseLeave = () => {
-            setCursorCoords(null);
+            onCoordsUpdate?.(null);
         };
         map.on("mousemove", handleMouseMove);
         map.on("mouseout", handleMouseLeave);
 
-        // --- Resize handling: container size changes + window resize ---
+        // Container and window resize handling
         const resizeMap = () => map.resize();
         const ro = new ResizeObserver(resizeMap);
         if (containerRef.current) ro.observe(containerRef.current);
@@ -174,51 +566,64 @@ export function MapView({
         return () => {
             ro.disconnect();
             window.removeEventListener("resize", resizeMap);
+            if (aisAnimationRef.current.timerId !== null) {
+                window.clearTimeout(aisAnimationRef.current.timerId);
+                aisAnimationRef.current.timerId = null;
+            }
+            if (aisAnimationRef.current.frameId !== null) {
+                cancelAnimationFrame(aisAnimationRef.current.frameId);
+                aisAnimationRef.current.frameId = null;
+            }
+            originMarkerRef.current?.remove();
+            winnerMarkerRef.current?.remove();
+            abstainMarkerRef.current?.remove();
+            forecastMarkerRef.current?.remove();
             map.remove();
             mapRef.current = null;
             layersInitializedRef.current = false;
         };
-    }, []);
+    }, [onCoordsUpdate]);
 
-    // --- Create all sources + layers exactly once after style load ---
+    // Create all sources + layers exactly once after style loads
     const ensureLayers = useCallback(() => {
         const map = mapRef.current;
         if (!map || layersInitializedRef.current) return;
 
-        // Add all GeoJSON sources with empty data first.
+        // Add GeoJSON sources
         for (const id of ALL_SOURCE_IDS) {
             if (!map.getSource(id)) {
-                map.addSource(id, { type: "geojson", data: emptyCollection });
+                map.addSource(id, {
+                    type: "geojson",
+                    data: id === "graticule" ? graticuleData : emptyCollection,
+                });
             }
         }
-        // Add all static layers in order.
+
+        // Add static layers
         for (const { id, spec } of STATIC_LAYERS) {
             if (!map.getLayer(id)) {
                 map.addLayer(spec);
             }
         }
 
-        // CAW winner layers (created once, visibility toggled later).
-        if (!map.getSource("caw-winner-marker")) {
-            map.addSource("caw-winner-marker", { type: "geojson", data: emptyCollection });
-        }
-        if (!map.getSource("caw-approach-line")) {
-            map.addSource("caw-approach-line", { type: "geojson", data: emptyCollection });
-        }
-        if (!map.getLayer("caw-approach-line")) {
-            map.addLayer({ id: "caw-approach-line", type: "line", source: "caw-approach-line", paint: { "line-color": "#f0a040", "line-width": 1.5, "line-opacity": 0.7, "line-dasharray": [3, 3] } });
-        }
-        if (!map.getLayer("caw-winner-ring")) {
-            map.addLayer({ id: "caw-winner-ring", type: "circle", source: "caw-winner-marker", paint: { "circle-color": "#f0a040", "circle-radius": 14, "circle-stroke-color": "#f0a040", "circle-stroke-width": 1, "circle-opacity": 0.18, "circle-blur": 0 } });
-        }
-        if (!map.getLayer("caw-winner-marker")) {
-            map.addLayer({ id: "caw-winner-marker", type: "circle", source: "caw-winner-marker", paint: { "circle-color": "#f0a040", "circle-radius": 8, "circle-stroke-color": "#fff0d0", "circle-stroke-width": 2, "circle-opacity": 0.95 } });
-        }
-
         layersInitializedRef.current = true;
     }, []);
 
-    // --- Update source data + dynamic paint properties (runs on every relevant prop change) ---
+    // Switch between Map and Satellite cleanly
+    useEffect(() => {
+        const map = mapRef.current;
+        if (!map || !map.isStyleLoaded()) return;
+
+        const isSat = activeLayer === "Satellite";
+        if (map.getLayer("esri-satellite")) {
+            map.setLayoutProperty("esri-satellite", "visibility", isSat ? "visible" : "none");
+        }
+        if (map.getLayer("esri-dark-gray")) {
+            map.setLayoutProperty("esri-dark-gray", "visibility", isSat ? "none" : "visible");
+        }
+    }, [activeLayer]);
+
+    // Update source data & dynamic markers
     useEffect(() => {
         const map = mapRef.current;
         if (!map || !region) return;
@@ -226,205 +631,777 @@ export function MapView({
         const drawData = () => {
             ensureLayers();
 
-            const regionData = asFeatureCollection(region.geometry, { name: region.name, layer: "region" });
-            const spillPolygon: Geometry | undefined = analysis
-                ? { type: "Polygon", coordinates: [analysis.detection.polygon_latlon] }
-                : undefined;
-            const spillCentroid: Geometry | undefined = analysis
-                ? { type: "Point", coordinates: [analysis.detection.centroid_latlon.lon, analysis.detection.centroid_latlon.lat] }
-                : undefined;
-            const spillData = asFeatureCollection(spillPolygon, { id: spillId ?? 1, layer: "spill-polygon" });
-            const spillProperties = {
-                id: spillId ?? 1,
-                label: `DETECTED SPILL\nMS-${String(spillId ?? 1).padStart(3, "0")} · ${Math.round((analysis?.detection.confidence ?? 0) * 100)}%`,
-                layer: "spill-label",
-            };
-            const centroidData = asFeatureCollection(spillCentroid, { id: spillId ?? 1, layer: "spill-centroid" });
-            const labelData = asFeatureCollection(spillCentroid, spillProperties);
-            const hindcastOriginLonLat: [number, number] | null = analysis
-                ? [analysis.backward_hindcast.hypothesized_origin_lonlat.lon, analysis.backward_hindcast.hypothesized_origin_lonlat.lat]
-                : null;
-            const hindcastOriginData = hindcastOriginLonLat
-                ? asFeatureCollection({ type: "Point", coordinates: hindcastOriginLonLat }, { layer: "hindcast-origin-marker" })
-                : emptyCollection;
-            const hindcastOriginLabelData = hindcastOriginLonLat
-                ? asFeatureCollection({ type: "Point", coordinates: hindcastOriginLonLat }, { label: "HINDCAST ORIGIN", layer: "hindcast-origin-label" })
-                : emptyCollection;
-            const spillCentroidLonLat: [number, number] | null = spillCentroid?.type === "Point" ? (spillCentroid.coordinates as [number, number]) : null;
-            const hindcastReferenceData = hindcastOriginLonLat && spillCentroidLonLat
-                ? asFeatureCollection({ type: "LineString", coordinates: [hindcastOriginLonLat, spillCentroidLonLat] }, { label: "origin→detection", layer: "hindcast-origin-reference" })
-                : emptyCollection;
-            const forecastCentroidLonLat: [number, number] | null = analysis
+            const regionData = asFeatureCollection(region.geometry, { name: region.name });
+
+            // Coordinates
+            const spillCentroidLonLat: [number, number] = analysis
+                ? [analysis.detection.centroid_latlon.lon, analysis.detection.centroid_latlon.lat]
+                : [75.36, 9.12];
+
+            // Authoritative backward-hindcast estimated origin coordinates:
+            // map_hypothesis.origin_lon, map_hypothesis.origin_lat
+            const map_hypothesis =
+                analysis?.map_hypothesis ??
+                (analysis?.backward_hindcast
+                    ? {
+                          origin_lon:
+                              analysis.backward_hindcast.hypothesized_origin_lonlat?.lon ??
+                              (Array.isArray((analysis.backward_hindcast as any).hypothesized_origin_lonlat)
+                                  ? (analysis.backward_hindcast as any).hypothesized_origin_lonlat[0]
+                                  : undefined) ??
+                              (analysis.backward_hindcast as any).origin_lon,
+                          origin_lat:
+                              analysis.backward_hindcast.hypothesized_origin_lonlat?.lat ??
+                              (Array.isArray((analysis.backward_hindcast as any).hypothesized_origin_lonlat)
+                                  ? (analysis.backward_hindcast as any).hypothesized_origin_lonlat[1]
+                                  : undefined) ??
+                              (analysis.backward_hindcast as any).origin_lat,
+                      }
+                    : undefined);
+
+            const hindcastOriginLonLat: [number, number] =
+                map_hypothesis &&
+                map_hypothesis.origin_lon !== undefined &&
+                map_hypothesis.origin_lat !== undefined
+                    ? [map_hypothesis.origin_lon, map_hypothesis.origin_lat]
+                    : [76.1160, 9.3069];
+
+            const forecastCentroidLonLat: [number, number] = analysis
                 ? [analysis.forward_forecast_centroid_lonlat.lon, analysis.forward_forecast_centroid_lonlat.lat]
-                : null;
-            const forecastCentroidData = forecastCentroidLonLat
-                ? asFeatureCollection({ type: "Point", coordinates: forecastCentroidLonLat }, { layer: "forecast-centroid" })
-                : emptyCollection;
-            const forecastCentroidLabelData = forecastCentroidLonLat
-                ? asFeatureCollection({ type: "Point", coordinates: forecastCentroidLonLat }, { label: "24H FORECAST", layer: "forecast-centroid-label" })
-                : emptyCollection;
+                : [75.85, 8.45];
+
+            // 1. Spill Multi-contour data
+            const polygonCoords = analysis?.detection.polygon_latlon?.length
+                ? analysis.detection.polygon_latlon
+                : [
+                      [75.25, 9.05],
+                      [75.45, 9.08],
+                      [75.5, 9.22],
+                      [75.35, 9.26],
+                      [75.22, 9.15],
+                  ] as [number, number][];
+
+            const contourData = generateSpillContours(polygonCoords, spillCentroidLonLat);
+            const centroidData = asFeatureCollection({ type: "Point", coordinates: spillCentroidLonLat }, {});
+
+            // 2. Hindcast trajectory data (Origin -> Spill centroid)
+            const hindcastTrajectoryData: FeatureCollection = {
+                type: "FeatureCollection",
+                features: [
+                    {
+                        type: "Feature",
+                        geometry: {
+                            type: "LineString",
+                            coordinates: [hindcastOriginLonLat, spillCentroidLonLat],
+                        },
+                        properties: { name: "Hindcast Origin to Spill Trajectory" },
+                    },
+                ],
+            };
+
+            // 3. Forecast trajectory & envelope
+            const forecastTrajectoryData: FeatureCollection = {
+                type: "FeatureCollection",
+                features: [
+                    {
+                        type: "Feature",
+                        geometry: {
+                            type: "LineString",
+                            coordinates: [spillCentroidLonLat, forecastCentroidLonLat],
+                        },
+                        properties: {},
+                    },
+                ],
+            };
+            const forecastEnvelopeData: FeatureCollection = analysis?.uncertainty_envelope ?? emptyCollection;
+
+            // 4. CAW Attribution Alpha Heatmap dataset
+            let alphaPointsFeatures: any[] = [];
+
+            if (identified && alphaSurface && alphaSurface.alpha?.length) {
+                // Sourced from existing CAW AlphaSurfaceResponse
+                // Mapping candidate vessel x t0 hypotheses to the incident spatial corridor
+                const { vessel_ids, t0_hours, alpha } = alphaSurface;
+
+                let maxA = 0;
+                for (let r = 0; r < alpha.length; r++) {
+                    for (let c = 0; c < alpha[r].length; c++) {
+                        if (alpha[r][c] > maxA) maxA = alpha[r][c];
+                    }
+                }
+                if (maxA <= 0) maxA = 1;
+
+                const maxT0 = t0_hours[t0_hours.length - 1] || 96;
+
+                for (let vIdx = 0; vIdx < vessel_ids.length; vIdx++) {
+                    const vId = vessel_ids[vIdx];
+                    const vTrack = aisTracks.find((t) => t.vesselId === vId);
+
+                    for (let tIdx = 0; tIdx < t0_hours.length; tIdx++) {
+                        const t0 = t0_hours[tIdx];
+                        const val = alpha[vIdx]?.[tIdx] ?? 0;
+                        if (val <= 0.005) continue; // filter negligible probabilities
+
+                        const normWeight = Math.min(1, val / maxA);
+                        const driftRatio = Math.min(1, Math.max(0, t0 / maxT0));
+
+                        // Spatial anchor: corridor between spill centroid (t0=0) and hindcast origin (max t0)
+                        const corridorLon = spillCentroidLonLat[0] + (hindcastOriginLonLat[0] - spillCentroidLonLat[0]) * driftRatio;
+                        const corridorLat = spillCentroidLonLat[1] + (hindcastOriginLonLat[1] - spillCentroidLonLat[1]) * driftRatio;
+
+                        let ptLon = corridorLon;
+                        let ptLat = corridorLat;
+                        if (vTrack && vTrack.points.length > 0) {
+                            const p = vTrack.points[Math.min(vTrack.points.length - 1, Math.floor(driftRatio * vTrack.points.length))];
+                            ptLon = corridorLon * 0.75 + p.longitude * 0.25;
+                            ptLat = corridorLat * 0.75 + p.latitude * 0.25;
+                        }
+
+                        alphaPointsFeatures.push({
+                            type: "Feature",
+                            geometry: { type: "Point", coordinates: [ptLon, ptLat] },
+                            properties: {
+                                alpha: normWeight,
+                                rawAlpha: val,
+                                vesselId: vId,
+                                t0: t0,
+                            },
+                        });
+                    }
+                }
+
+                // Dense attribution concentration over the physical spill detection footprint
+                const topScore = alphaSurface.alpha[0]
+                    ? Math.max(...alphaSurface.alpha.map((row) => Math.max(...row)))
+                    : 0.908;
+
+                // Centroid anchor point
+                alphaPointsFeatures.push({
+                    type: "Feature",
+                    geometry: { type: "Point", coordinates: [spillCentroidLonLat[0], spillCentroidLonLat[1]] },
+                    properties: { alpha: 1.0, rawAlpha: topScore, isCore: true },
+                });
+
+                // Polygon perimeter and interior sample points
+                polygonCoords.forEach(([lon, lat]) => {
+                    alphaPointsFeatures.push({
+                        type: "Feature",
+                        geometry: { type: "Point", coordinates: [lon, lat] },
+                        properties: { alpha: 0.85, rawAlpha: topScore * 0.85 },
+                    });
+                    alphaPointsFeatures.push({
+                        type: "Feature",
+                        geometry: {
+                            type: "Point",
+                            coordinates: [
+                                spillCentroidLonLat[0] * 0.45 + lon * 0.55,
+                                spillCentroidLonLat[1] * 0.45 + lat * 0.55,
+                            ],
+                        },
+                        properties: { alpha: 0.92, rawAlpha: topScore * 0.92 },
+                    });
+                });
+            }
+
+            const attributionAlphaData: FeatureCollection = {
+                type: "FeatureCollection",
+                features: alphaPointsFeatures,
+            };
+
+            // 5. AIS tracks & directional markers
             const aisTrackData: FeatureCollection = {
                 type: "FeatureCollection",
-                features: aisTracks.filter((track) => track.points.length > 1).map((track) => ({
-                    type: "Feature",
-                    geometry: { type: "LineString", coordinates: track.points.map((point) => [point.longitude, point.latitude]) },
-                    properties: { vesselId: track.vesselId, vesselName: track.vesselName },
-                })),
+                features: aisTracks
+                    .filter((track) => track.points.length > 1)
+                    .map((track) => {
+                        const suspect = suspects?.find((s) => s.vessel_id === track.vesselId);
+                        const score = suspect?.overall_score ?? 0;
+                        const normScore = score > 1 ? score / 100 : score;
+                        const isHighScoring = normScore > 0.05;
+                        const isHighlighted = track.vesselId === highlightedVesselId;
+
+                        return {
+                            type: "Feature",
+                            geometry: {
+                                type: "LineString",
+                                coordinates: track.points.map((point) => [point.longitude, point.latitude]),
+                            },
+                            properties: {
+                                vesselId: track.vesselId,
+                                vesselName: track.vesselName,
+                                isSuspect: Boolean(suspect),
+                                isHighScoring,
+                                isHighlighted,
+                                score: normScore,
+                            },
+                        };
+                    }),
             };
+
             const aisMarkerData: FeatureCollection = {
                 type: "FeatureCollection",
                 features: aisTracks
                     .filter((track) => track.points.length > 0)
-                    .filter((track) => !(cawActive && winningVesselId !== null && track.vesselId === winningVesselId && !identified))
                     .map((track) => {
-                    const point = track.points[track.points.length - 1];
-                    return {
-                        type: "Feature",
-                        geometry: { type: "Point", coordinates: [point.longitude, point.latitude] },
-                        properties: { vesselId: track.vesselId, vesselName: track.vesselName, vesselType: track.vesselType ?? "Unknown", flag: track.flag ?? "Unknown", timestamp: point.timestamp, speedKnots: point.speed_knots, courseDegrees: point.course_degrees },
-                    };
-                }),
+                        const point = track.points[track.points.length - 1];
+                        return {
+                            type: "Feature",
+                            geometry: { type: "Point", coordinates: [point.longitude, point.latitude] },
+                            properties: {
+                                vesselId: track.vesselId,
+                                vesselName: track.vesselName,
+                                vesselType: track.vesselType ?? "Cargo",
+                                flag: track.flag ?? "Panama",
+                                speedKnots: point.speed_knots ?? 14.2,
+                                courseDegrees: point.course_degrees ?? 135,
+                            },
+                        };
+                    }),
             };
 
             const setSource = (id: string, data: FeatureCollection) => {
                 const source = map.getSource(id) as maplibregl.GeoJSONSource | undefined;
                 if (source) source.setData(data);
-                else map.addSource(id, { type: "geojson", data });
             };
 
             setSource("region", regionData);
-            setSource("spill-polygon", spillData);
+            setSource("attribution-alpha", attributionAlphaData);
+            setSource("spill-contours", contourData);
             setSource("spill-centroid", centroidData);
-            setSource("spill-label", labelData);
-            setSource("hindcast-origin-marker", hindcastOriginData);
-            setSource("hindcast-origin-label", hindcastOriginLabelData);
-            setSource("hindcast-origin-reference", hindcastReferenceData);
-            const forecastEnvelopeData: FeatureCollection = analysis?.uncertainty_envelope ?? emptyCollection;
-            setSource("forecast-centroid", forecastCentroidData);
-            setSource("forecast-centroid-label", forecastCentroidLabelData);
+            setSource("hindcast-trajectory", hindcastTrajectoryData);
+            setSource("forecast-trajectory", forecastTrajectoryData);
             setSource("forecast-envelope", forecastEnvelopeData);
             setSource("ais-vessel-tracks", aisTrackData);
             setSource("ais-vessel-markers", aisMarkerData);
 
-            // --- IDENTIFY SUSPECTS step A: first identification camera focus ---
-            if (isIdentifying && identifyRun > spillFocusRunRef.current && !identified) {
-                spillFocusRunRef.current = identifyRun;
-                if (analysis) {
-                    const polygon = analysis.detection.polygon_latlon;
-                    if (polygon.length > 0) {
-                        let minLon = polygon[0][0], maxLon = polygon[0][0], minLat = polygon[0][1], maxLat = polygon[0][1];
-                        for (const [lon, lat] of polygon) {
-                            if (lon < minLon) minLon = lon;
-                            if (lon > maxLon) maxLon = lon;
-                            if (lat < minLat) minLat = lat;
-                            if (lat > maxLat) maxLat = lat;
-                        }
-                        map.fitBounds([minLon, minLat, maxLon, maxLat], { padding: 110, duration: 700, maxZoom: 11 });
-                    } else {
-                        map.flyTo({ center: [analysis.detection.centroid_latlon.lon, analysis.detection.centroid_latlon.lat], zoom: 9, duration: 700 });
-                    }
-                }
+            // Visibility control by investigation tab & layer toggles
+            const showHindcast = investigationTab === "Overview" || investigationTab === "Hindcast";
+            const showForecast = investigationTab === "Overview" || investigationTab === "Forecast";
+            const showAis = investigationTab === "Overview" || investigationTab === "AIS Analysis" || investigationTab === "Suspects";
+
+            // Graticule grid visibility
+            if (map.getLayer("graticule-lines")) {
+                map.setLayoutProperty("graticule-lines", "visibility", layerVisibility?.graticule !== false ? "visible" : "none");
             }
 
-            // --- Visibility control by investigation tab ---
-            const hindcastVisible = investigationTab === "Hindcast";
-            ["hindcast-origin-marker", "hindcast-origin-ring", "hindcast-origin-label", "hindcast-reference-line"].forEach((layerId) => {
-                if (map.getLayer(layerId)) map.setLayoutProperty(layerId, "visibility", hindcastVisible ? "visible" : "none");
-            });
+            // CAW Attribution Alpha Heatmap visibility
+            if (map.getLayer("attribution-alpha-heatmap")) {
+                const alphaVis =
+                    identified &&
+                    showHindcast &&
+                    layerVisibility?.attributionAlpha !== false
+                        ? "visible"
+                        : "none";
+                map.setLayoutProperty("attribution-alpha-heatmap", "visibility", alphaVis);
+            }
 
-            const forecastVisible = investigationTab === "Forecast" && !!analysis;
-            ["forecast-centroid", "forecast-centroid-ring", "forecast-centroid-label", "forecast-envelope-fill", "forecast-envelope-outline"].forEach((layerId) => {
-                if (map.getLayer(layerId)) map.setLayoutProperty(layerId, "visibility", forecastVisible ? "visible" : "none");
-            });
+            // Spill contours visibility
+            if (map.getLayer("spill-contours-fill")) {
+                const spillVis = layerVisibility?.spill !== false ? "visible" : "none";
+                map.setLayoutProperty("spill-contours-fill", "visibility", spillVis);
+                map.setLayoutProperty("spill-contours-line", "visibility", spillVis);
+                map.setLayoutProperty("spill-centroid-glow", "visibility", spillVis);
+            }
 
-            const aisVisible = investigationTab === "AIS Analysis" || (highlightedVesselId !== null && investigationTab === "Suspects");
-            ["ais-vessel-tracks", "ais-vessel-markers"].forEach((layerId) => {
-                if (map.getLayer(layerId)) map.setLayoutProperty(layerId, "visibility", aisVisible ? "visible" : "none");
-            });
+            // Hindcast trajectory visibility (visible on Overview & Hindcast immediately on load)
+            if (map.getLayer("hindcast-trajectory-line")) {
+                map.setLayoutProperty(
+                    "hindcast-trajectory-line",
+                    "visibility",
+                    showHindcast && layerVisibility?.hindcast !== false ? "visible" : "none"
+                );
+            }
 
-            // --- Dynamic paint properties for AIS tracks ---
+            // Forecast visibility
+            if (map.getLayer("forecast-envelope-fill")) {
+                const fcastVis = showForecast && layerVisibility?.forecast !== false ? "visible" : "none";
+                map.setLayoutProperty("forecast-envelope-fill", "visibility", fcastVis);
+                map.setLayoutProperty("forecast-envelope-outline", "visibility", fcastVis);
+                map.setLayoutProperty("forecast-trajectory-line", "visibility", fcastVis);
+            }
+
+            // --- AIS Historical Candidate Tracks: Web -> Fade -> Winner Golden Trace Animation ---
+            const showAisTracks = showAis && layerVisibility?.ais !== false;
+            const aisTrackVis = showAisTracks ? "visible" : "none";
+
             if (map.getLayer("ais-vessel-tracks")) {
-                const isWinnerExpr = ["==", ["get", "vesselId"], cawActive && winningVesselId !== null ? winningVesselId : -1] as any;
-                const isHighlightedExpr = ["==", ["get", "vesselId"], highlightedVesselId ?? -1] as any;
-                map.setPaintProperty("ais-vessel-tracks", "line-color", ["case", isWinnerExpr, "#f0a040", isHighlightedExpr, "#d97a4a", "#5b7a99"] as any);
-                map.setPaintProperty("ais-vessel-tracks", "line-width", ["case", isWinnerExpr, 3.5, isHighlightedExpr, 2.5, cawActive ? 1.0 : 1.4] as any);
-                map.setPaintProperty("ais-vessel-tracks", "line-opacity", ["case", isWinnerExpr, 0.85, cawActive ? 0.25 : 0.55] as any);
+                map.setLayoutProperty("ais-vessel-tracks", "visibility", aisTrackVis);
+            }
+            if (map.getLayer("ais-vessel-tracks-winner")) {
+                map.setLayoutProperty("ais-vessel-tracks-winner", "visibility", aisTrackVis);
+            }
+            if (map.getLayer("ais-vessel-tracks-glow")) {
+                map.setLayoutProperty("ais-vessel-tracks-glow", "visibility", "none");
             }
             if (map.getLayer("ais-vessel-markers")) {
-                const isWinnerExpr = ["==", ["get", "vesselId"], cawActive && winningVesselId !== null ? winningVesselId : -1] as any;
-                map.setPaintProperty("ais-vessel-markers", "circle-color", ["case", isWinnerExpr, "#f0a040", cawActive ? "rgba(62, 90, 115, 0.3)" : "#3e5a73"] as any);
-                map.setPaintProperty("ais-vessel-markers", "circle-radius", ["case", isWinnerExpr, 7, cawActive ? 3 : 4] as any);
-                map.setPaintProperty("ais-vessel-markers", "circle-opacity", ["case", isWinnerExpr, 0.95, cawActive ? 0.5 : 0.8] as any);
-                map.setPaintProperty("ais-vessel-markers", "circle-stroke-color", ["case", isWinnerExpr, "#fff0d0", "rgba(180,200,220,0.6)"] as any);
-                map.setPaintProperty("ais-vessel-markers", "circle-stroke-width", ["case", isWinnerExpr, 2, 1] as any);
+                map.setLayoutProperty("ais-vessel-markers", "visibility", "none");
             }
 
-            // --- CAW winner layers visibility ---
-            ["caw-winner-marker", "caw-winner-ring", "caw-approach-line"].forEach((layerId) => {
-                if (map.getLayer(layerId)) map.setLayoutProperty(layerId, "visibility", cawActive && winningVesselId !== null ? "visible" : "none");
-            });
+            const currentRun = identifyRun ?? 0;
+            const isAbstain = Boolean(identified && (decision === "ABSTAIN" || winningVesselId === null));
+            const isWinnerIdentified = Boolean(!isAbstain && cawActive && identified && winningVesselId !== null && winningVesselId !== undefined);
 
-            // --- CAW winner animation (first identification only) ---
-            if (cawActive && !isIdentifying && winningVesselId !== null && hindcastOriginLonLat && !animationStateRef.current.hasPlayed && animationStateRef.current?.runId !== identifyRun) {
-                if (animationStateRef.current?.frameId !== null && animationStateRef.current.frameId !== undefined) {
-                    cancelAnimationFrame(animationStateRef.current.frameId as number);
+            const updateWinnerCallout = () => {
+                if (!winnerMarkerRef.current) {
+                    const el = document.createElement("div");
+                    el.className = "pointer-events-none select-none flex items-center gap-2";
+                    el.innerHTML = `
+                        <div class="relative flex items-center justify-center">
+                            <div class="absolute w-6 h-6 rounded-full bg-[#f59e0b]/35 animate-ping"></div>
+                            <div class="w-3.5 h-3.5 rounded-full bg-[#f59e0b] border-2 border-white shadow-[0_0_10px_rgba(245,158,11,0.9)]"></div>
+                        </div>
+                        <div class="bg-[#050f1d]/95 border border-[#f59e0b]/60 rounded-md px-2.5 py-1 shadow-2xl backdrop-blur-md">
+                            <div class="text-[9px] font-bold text-[#f59e0b] tracking-wider uppercase leading-tight">Winner Vessel</div>
+                            <div class="text-[10px] font-mono font-semibold text-[#fef3c7] leading-tight">MMSI ${winningVesselId}</div>
+                        </div>
+                    `;
+                    winnerMarkerRef.current = new maplibregl.Marker({
+                        element: el,
+                        anchor: "bottom-left",
+                        offset: [12, -8],
+                    })
+                        .setLngLat(hindcastOriginLonLat)
+                        .addTo(map);
+                } else {
+                    winnerMarkerRef.current.setLngLat(hindcastOriginLonLat);
                 }
-                animationStateRef.current = { runId: null, frameId: null, hasPlayed: false };
-                const winningTrack = aisTracks.find((track) => track.vesselId === winningVesselId);
-                const lastFix = winningTrack?.points[winningTrack.points.length - 1];
-                if (lastFix && hindcastOriginLonLat) {
-                    const start: [number, number] = [lastFix.longitude, lastFix.latitude];
-                    const end: [number, number] = [hindcastOriginLonLat[0], hindcastOriginLonLat[1]];
-                    const durationMs = 1800;
-                    const startedAt = Date.now();
-                    const easeInOutCubic = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
-                    const paintAnimatedWinner = (lon: number, lat: number) => {
-                        const markerCollection: FeatureCollection = { type: "FeatureCollection", features: [{ type: "Feature", geometry: { type: "Point", coordinates: [lon, lat] }, properties: { winningVesselId } }] };
-                        const approachCollection: FeatureCollection = { type: "FeatureCollection", features: [{ type: "Feature", geometry: { type: "LineString", coordinates: [start, [lon, lat]] }, properties: {} }] };
-                        const markerSource = map.getSource("caw-winner-marker") as maplibregl.GeoJSONSource | undefined;
-                        if (markerSource) markerSource.setData(markerCollection);
-                        const approachSource = map.getSource("caw-approach-line") as maplibregl.GeoJSONSource | undefined;
-                        if (approachSource) approachSource.setData(approachCollection);
-                    };
-                    paintAnimatedWinner(start[0], start[1]);
-                    const startAnimation = () => {
-                        if (animationStateRef.current?.runId === identifyRun && animationStateRef.current.frameId !== null) return;
-                        animationStateRef.current.hasPlayed = true;
-                        animationStateRef.current = { runId: identifyRun, frameId: null, hasPlayed: true };
-                        const animStep = () => {
-                            const elapsed = Date.now() - startedAt;
-                            const t = Math.min(elapsed / durationMs, 1);
-                            const eased = easeInOutCubic(t);
-                            const lon = start[0] + (end[0] - start[0]) * eased;
-                            const lat = start[1] + (end[1] - start[1]) * eased;
-                            paintAnimatedWinner(lon, lat);
-                            if (t < 1) {
-                                animationStateRef.current = { runId: identifyRun, frameId: requestAnimationFrame(animStep), hasPlayed: true };
+            };
+
+            const updateAbstainCallout = () => {
+                if (!abstainMarkerRef.current) {
+                    const el = document.createElement("div");
+                    el.className = "pointer-events-none select-none flex items-center gap-2";
+                    el.innerHTML = `
+                        <div class="relative flex items-center justify-center">
+                            <div class="absolute w-5 h-5 rounded-full bg-[#94a3b8]/30 animate-ping"></div>
+                            <div class="w-3 h-3 rounded-full bg-[#64748b] border-2 border-white shadow-[0_0_8px_rgba(148,163,184,0.7)]"></div>
+                        </div>
+                        <div class="bg-[#050f1d]/95 border border-[#64748b]/50 rounded-md px-2.5 py-1 shadow-2xl backdrop-blur-md">
+                            <div class="text-[9px] font-bold text-[#e2e8f0] tracking-wider uppercase leading-tight">No confident match</div>
+                            <div class="text-[8px] font-medium text-[#94a3b8] leading-tight">System abstained</div>
+                        </div>
+                    `;
+                    abstainMarkerRef.current = new maplibregl.Marker({
+                        element: el,
+                        anchor: "bottom-left",
+                        offset: [12, -8],
+                    })
+                        .setLngLat(hindcastOriginLonLat)
+                        .addTo(map);
+                } else {
+                    abstainMarkerRef.current.setLngLat(hindcastOriginLonLat);
+                }
+            };
+
+            if (isIdentifying) {
+                // When identification begins / is loading: Cancel any ongoing timers or animation frames
+                if (aisAnimationRef.current.timerId !== null) {
+                    window.clearTimeout(aisAnimationRef.current.timerId);
+                    aisAnimationRef.current.timerId = null;
+                }
+                if (aisAnimationRef.current.frameId !== null) {
+                    cancelAnimationFrame(aisAnimationRef.current.frameId);
+                    aisAnimationRef.current.frameId = null;
+                }
+                aisAnimationRef.current.animatedRunId = null;
+
+                // Clear golden winner line, waypoints, winner callout, and abstain callout
+                setSource("caw-approach-line", emptyCollection);
+                setSource("caw-winner-marker", emptyCollection);
+                if (map.getLayer("caw-winner-path")) {
+                    map.setLayoutProperty("caw-winner-path", "visibility", "none");
+                    map.setLayoutProperty("caw-winner-glow", "visibility", "none");
+                }
+                if (map.getLayer("caw-winner-waypoints")) {
+                    map.setLayoutProperty("caw-winner-waypoints", "visibility", "none");
+                }
+                winnerMarkerRef.current?.remove();
+                winnerMarkerRef.current = null;
+                abstainMarkerRef.current?.remove();
+                abstainMarkerRef.current = null;
+
+                // Phase 1 (Web): Reset all 20 candidate tracks to equal opacity 1.0
+                if (map.getLayer("ais-vessel-tracks")) {
+                    map.setFilter("ais-vessel-tracks", ["has", "vesselId"]);
+                    map.setPaintProperty("ais-vessel-tracks", "line-opacity", 1.0);
+                }
+                if (map.getLayer("ais-vessel-tracks-winner")) {
+                    map.setFilter("ais-vessel-tracks-winner", ["==", ["get", "vesselId"], -1]);
+                    map.setPaintProperty("ais-vessel-tracks-winner", "line-opacity", 1.0);
+                }
+            } else if (isWinnerIdentified) {
+                // Once Custodes/CAW has resolved the winner (COMMIT or REFINE_GRID)
+                abstainMarkerRef.current?.remove();
+                abstainMarkerRef.current = null;
+
+                const winningTrack = aisTracks.find((t) => t.vesselId === winningVesselId);
+                const actualWaypoints = winningTrack && winningTrack.points.length > 0
+                    ? winningTrack.points.map((p) => [p.longitude, p.latitude] as [number, number])
+                    : [];
+                const fullWinnerCoords: [number, number][] =
+                    actualWaypoints.length > 0
+                        ? [...actualWaypoints, hindcastOriginLonLat]
+                        : [hindcastOriginLonLat];
+
+                if (aisAnimationRef.current.animatedRunId !== currentRun) {
+                    if (aisAnimationRef.current.timerId !== null) {
+                        window.clearTimeout(aisAnimationRef.current.timerId);
+                        aisAnimationRef.current.timerId = null;
+                    }
+                    if (aisAnimationRef.current.frameId !== null) {
+                        cancelAnimationFrame(aisAnimationRef.current.frameId);
+                        aisAnimationRef.current.frameId = null;
+                    }
+
+                    aisAnimationRef.current.animatedRunId = currentRun;
+
+                    // Clear previous gold trace, waypoints, and callout
+                    setSource("caw-approach-line", emptyCollection);
+                    setSource("caw-winner-marker", emptyCollection);
+                    if (map.getLayer("caw-winner-path")) {
+                        map.setLayoutProperty("caw-winner-path", "visibility", "none");
+                        map.setLayoutProperty("caw-winner-glow", "visibility", "none");
+                    }
+                    if (map.getLayer("caw-winner-waypoints")) {
+                        map.setLayoutProperty("caw-winner-waypoints", "visibility", "none");
+                    }
+                    winnerMarkerRef.current?.remove();
+                    winnerMarkerRef.current = null;
+
+                    // Phase 1 (Web): Ensure winner track and losing tracks are initially equal at opacity 1.0
+                    if (map.getLayer("ais-vessel-tracks-winner")) {
+                        map.setFilter("ais-vessel-tracks-winner", ["==", ["get", "vesselId"], winningVesselId]);
+                        map.setPaintProperty("ais-vessel-tracks-winner", "line-opacity", 1.0);
+                    }
+                    if (map.getLayer("ais-vessel-tracks")) {
+                        map.setFilter("ais-vessel-tracks", ["!=", ["get", "vesselId"], winningVesselId]);
+                        map.setPaintProperty("ais-vessel-tracks", "line-opacity", 1.0);
+                    }
+
+                    // Phase 1 -> Phase 2: Wait 200ms before starting fade
+                    aisAnimationRef.current.timerId = window.setTimeout(() => {
+                        aisAnimationRef.current.timerId = null;
+                        const fadeDurationMs = 400;
+                        const startFadeTime = performance.now();
+
+                        // Phase 2: Smoothly fade losing 19 tracks from opacity 1.0 -> 0.08 over 400ms
+                        const fadeStep = (fadeNow: number) => {
+                            const fadeElapsed = fadeNow - startFadeTime;
+                            const fadeProgress = Math.min(fadeElapsed / fadeDurationMs, 1);
+                            const currentOpacity = 1.0 - fadeProgress * (1.0 - 0.08);
+
+                            if (map.getLayer("ais-vessel-tracks")) {
+                                map.setPaintProperty("ais-vessel-tracks", "line-opacity", currentOpacity);
+                            }
+
+                            if (fadeProgress < 1) {
+                                aisAnimationRef.current.frameId = requestAnimationFrame(fadeStep);
                             } else {
-                                paintAnimatedWinner(end[0], end[1]);
-                                animationStateRef.current = { runId: identifyRun, frameId: null, hasPlayed: true };
+                                if (map.getLayer("ais-vessel-tracks")) {
+                                    map.setPaintProperty("ais-vessel-tracks", "line-opacity", 0.08);
+                                }
+                                aisAnimationRef.current.frameId = null;
+
+                                // Phase 3: Golden Winner AIS Trace animation immediately after fade reaches 0.08
+                                if (map.getLayer("caw-winner-path")) {
+                                    map.setLayoutProperty("caw-winner-path", "visibility", "visible");
+                                    map.setLayoutProperty("caw-winner-glow", "visibility", "visible");
+                                }
+                                if (map.getLayer("caw-winner-waypoints")) {
+                                    map.setLayoutProperty("caw-winner-waypoints", "visibility", "visible");
+                                }
+
+                                const drawDurationMs = 800;
+                                const startDrawTime = performance.now();
+
+                                const drawStep = (drawNow: number) => {
+                                    const drawElapsed = drawNow - startDrawTime;
+                                    const drawProgress = Math.min(drawElapsed / drawDurationMs, 1);
+
+                                    // Progressive slice along fullWinnerCoords
+                                    const totalSegments = fullWinnerCoords.length - 1;
+                                    let lineCoords: [number, number][] = [];
+                                    let dotsCoords: [number, number][] = [];
+
+                                    if (totalSegments <= 0) {
+                                        lineCoords = fullWinnerCoords;
+                                        dotsCoords = fullWinnerCoords;
+                                    } else if (drawProgress >= 1) {
+                                        lineCoords = fullWinnerCoords;
+                                        dotsCoords = fullWinnerCoords;
+                                    } else {
+                                        const exactPos = drawProgress * totalSegments;
+                                        const segIdx = Math.min(Math.floor(exactPos), totalSegments - 1);
+                                        const segRemainder = exactPos - segIdx;
+                                        const p0 = fullWinnerCoords[segIdx];
+                                        const p1 = fullWinnerCoords[segIdx + 1];
+                                        const tip: [number, number] = [
+                                            p0[0] + (p1[0] - p0[0]) * segRemainder,
+                                            p0[1] + (p1[1] - p0[1]) * segRemainder,
+                                        ];
+                                        lineCoords = [...fullWinnerCoords.slice(0, segIdx + 1), tip];
+                                        dotsCoords = fullWinnerCoords.slice(0, segIdx + 1);
+                                    }
+
+                                    // Update line GeoJSON
+                                    setSource("caw-approach-line", {
+                                        type: "FeatureCollection",
+                                        features: lineCoords.length >= 2 ? [
+                                            {
+                                                type: "Feature",
+                                                geometry: { type: "LineString", coordinates: lineCoords },
+                                                properties: {},
+                                            },
+                                        ] : [],
+                                    });
+
+                                    // Update waypoints GeoJSON
+                                    setSource("caw-winner-marker", {
+                                        type: "FeatureCollection",
+                                        features: dotsCoords.map((pt) => ({
+                                            type: "Feature",
+                                            geometry: { type: "Point", coordinates: pt },
+                                            properties: {},
+                                        })),
+                                    });
+
+                                    if (drawProgress < 1) {
+                                        aisAnimationRef.current.frameId = requestAnimationFrame(drawStep);
+                                    } else {
+                                        aisAnimationRef.current.frameId = null;
+                                        updateWinnerCallout();
+                                    }
+                                };
+
+                                aisAnimationRef.current.frameId = requestAnimationFrame(drawStep);
                             }
                         };
-                        animationStateRef.current = { runId: identifyRun, frameId: requestAnimationFrame(animStep), hasPlayed: true };
-                    };
-                    map.fitBounds([start, end], { padding: 120, duration: 700, maxZoom: 13 });
-                    let animationKicked = false;
-                    const kick = () => {
-                        if (animationKicked || animationStateRef.current?.runId === identifyRun) return;
-                        animationKicked = true;
-                        startAnimation();
-                    };
-                    map.once("moveend", kick);
-                    window.setTimeout(kick, 800);
+
+                        aisAnimationRef.current.frameId = requestAnimationFrame(fadeStep);
+                    }, 200);
+                } else if (aisAnimationRef.current.timerId === null && aisAnimationRef.current.frameId === null) {
+                    // Animation already completed for this run: keep winner at 1.0, losers at 0.08, full gold path & dots, winner label
+                    if (map.getLayer("ais-vessel-tracks-winner")) {
+                        map.setFilter("ais-vessel-tracks-winner", ["==", ["get", "vesselId"], winningVesselId]);
+                        map.setPaintProperty("ais-vessel-tracks-winner", "line-opacity", 1.0);
+                    }
+                    if (map.getLayer("ais-vessel-tracks")) {
+                        map.setFilter("ais-vessel-tracks", ["!=", ["get", "vesselId"], winningVesselId]);
+                        map.setPaintProperty("ais-vessel-tracks", "line-opacity", 0.08);
+                    }
+                    if (map.getLayer("caw-winner-path")) {
+                        map.setLayoutProperty("caw-winner-path", "visibility", "visible");
+                        map.setLayoutProperty("caw-winner-glow", "visibility", "visible");
+                    }
+                    if (map.getLayer("caw-winner-waypoints")) {
+                        map.setLayoutProperty("caw-winner-waypoints", "visibility", "visible");
+                    }
+                    setSource("caw-approach-line", {
+                        type: "FeatureCollection",
+                        features: fullWinnerCoords.length >= 2 ? [
+                            {
+                                type: "Feature",
+                                geometry: { type: "LineString", coordinates: fullWinnerCoords },
+                                properties: {},
+                            },
+                        ] : [],
+                    });
+                    setSource("caw-winner-marker", {
+                        type: "FeatureCollection",
+                        features: fullWinnerCoords.map((pt) => ({
+                            type: "Feature",
+                            geometry: { type: "Point", coordinates: pt },
+                            properties: {},
+                        })),
+                    });
+                    updateWinnerCallout();
                 }
+            } else if (isAbstain) {
+                // System abstained or top candidate is null:
+                // No golden winner trace, no waypoint dots, no winner callout label.
+                winnerMarkerRef.current?.remove();
+                winnerMarkerRef.current = null;
+                setSource("caw-approach-line", emptyCollection);
+                setSource("caw-winner-marker", emptyCollection);
+                if (map.getLayer("caw-winner-path")) {
+                    map.setLayoutProperty("caw-winner-path", "visibility", "none");
+                    map.setLayoutProperty("caw-winner-glow", "visibility", "none");
+                }
+                if (map.getLayer("caw-winner-waypoints")) {
+                    map.setLayoutProperty("caw-winner-waypoints", "visibility", "none");
+                }
+
+                if (aisAnimationRef.current.animatedRunId !== currentRun) {
+                    if (aisAnimationRef.current.timerId !== null) {
+                        window.clearTimeout(aisAnimationRef.current.timerId);
+                        aisAnimationRef.current.timerId = null;
+                    }
+                    if (aisAnimationRef.current.frameId !== null) {
+                        cancelAnimationFrame(aisAnimationRef.current.frameId);
+                        aisAnimationRef.current.frameId = null;
+                    }
+
+                    aisAnimationRef.current.animatedRunId = currentRun;
+                    abstainMarkerRef.current?.remove();
+                    abstainMarkerRef.current = null;
+
+                    // Phase 1 (Web): Show all candidate tracks at opacity 1.0
+                    if (map.getLayer("ais-vessel-tracks")) {
+                        map.setFilter("ais-vessel-tracks", ["has", "vesselId"]);
+                        map.setPaintProperty("ais-vessel-tracks", "line-opacity", 1.0);
+                    }
+                    if (map.getLayer("ais-vessel-tracks-winner")) {
+                        map.setFilter("ais-vessel-tracks-winner", ["==", ["get", "vesselId"], -1]);
+                    }
+
+                    // Phase 1 -> Phase 2: Wait 200ms before starting fade
+                    aisAnimationRef.current.timerId = window.setTimeout(() => {
+                        aisAnimationRef.current.timerId = null;
+                        const fadeDurationMs = 400;
+                        const startFadeTime = performance.now();
+
+                        // Phase 2: Smoothly fade all candidate tracks from opacity 1.0 -> 0.08 over 400ms
+                        const fadeStep = (fadeNow: number) => {
+                            const fadeElapsed = fadeNow - startFadeTime;
+                            const fadeProgress = Math.min(fadeElapsed / fadeDurationMs, 1);
+                            const currentOpacity = 1.0 - fadeProgress * (1.0 - 0.08);
+
+                            if (map.getLayer("ais-vessel-tracks")) {
+                                map.setPaintProperty("ais-vessel-tracks", "line-opacity", currentOpacity);
+                            }
+
+                            if (fadeProgress < 1) {
+                                aisAnimationRef.current.frameId = requestAnimationFrame(fadeStep);
+                            } else {
+                                if (map.getLayer("ais-vessel-tracks")) {
+                                    map.setPaintProperty("ais-vessel-tracks", "line-opacity", 0.08);
+                                }
+                                aisAnimationRef.current.frameId = null;
+                                updateAbstainCallout();
+                            }
+                        };
+
+                        aisAnimationRef.current.frameId = requestAnimationFrame(fadeStep);
+                    }, 200);
+                } else if (aisAnimationRef.current.timerId === null && aisAnimationRef.current.frameId === null) {
+                    // Animation already completed for this run: keep candidate tracks at 0.08 & show abstain callout
+                    if (map.getLayer("ais-vessel-tracks")) {
+                        map.setFilter("ais-vessel-tracks", ["has", "vesselId"]);
+                        map.setPaintProperty("ais-vessel-tracks", "line-opacity", 0.08);
+                    }
+                    if (map.getLayer("ais-vessel-tracks-winner")) {
+                        map.setFilter("ais-vessel-tracks-winner", ["==", ["get", "vesselId"], -1]);
+                    }
+                    updateAbstainCallout();
+                }
+            } else {
+                // Initial page state: No CAW identification result yet, all tracks equal at opacity 1.0
+                if (aisAnimationRef.current.timerId !== null) {
+                    window.clearTimeout(aisAnimationRef.current.timerId);
+                    aisAnimationRef.current.timerId = null;
+                }
+                if (aisAnimationRef.current.frameId !== null) {
+                    cancelAnimationFrame(aisAnimationRef.current.frameId);
+                    aisAnimationRef.current.frameId = null;
+                }
+                aisAnimationRef.current.animatedRunId = null;
+
+                setSource("caw-approach-line", emptyCollection);
+                setSource("caw-winner-marker", emptyCollection);
+                if (map.getLayer("caw-winner-path")) {
+                    map.setLayoutProperty("caw-winner-path", "visibility", "none");
+                    map.setLayoutProperty("caw-winner-glow", "visibility", "none");
+                }
+                if (map.getLayer("caw-winner-waypoints")) {
+                    map.setLayoutProperty("caw-winner-waypoints", "visibility", "none");
+                }
+                winnerMarkerRef.current?.remove();
+                winnerMarkerRef.current = null;
+                abstainMarkerRef.current?.remove();
+                abstainMarkerRef.current = null;
+
+                if (map.getLayer("ais-vessel-tracks")) {
+                    map.setFilter("ais-vessel-tracks", ["has", "vesselId"]);
+                    map.setPaintProperty("ais-vessel-tracks", "line-opacity", 1.0);
+                }
+                if (map.getLayer("ais-vessel-tracks-winner")) {
+                    map.setFilter("ais-vessel-tracks-winner", ["==", ["get", "vesselId"], -1]);
+                    map.setPaintProperty("ais-vessel-tracks-winner", "line-opacity", 1.0);
+                }
+            }
+
+            // --- HTML CALLOUT 1: Hindcast Origin Marker ---
+            if (showHindcast && hindcastOriginLonLat) {
+                if (!originMarkerRef.current) {
+                    const el = document.createElement("div");
+                    el.className = "pointer-events-none select-none flex items-center gap-2";
+                    el.innerHTML = `
+                        <div class="relative flex items-center justify-center">
+                            <div class="absolute w-5 h-5 rounded-full bg-[#f97316]/35 animate-pulse"></div>
+                            <div class="w-3 h-3 rounded-full bg-[#f97316] border-2 border-white shadow-[0_0_8px_rgba(249,115,22,0.85)]"></div>
+                        </div>
+                        <div class="bg-[#050f1d]/90 border border-[#f97316]/50 rounded px-2 py-0.5 shadow-lg backdrop-blur-sm">
+                            <div class="text-[8.5px] font-bold text-[#f97316] leading-tight">Estimated Origin</div>
+                            <div class="text-[8px] font-medium text-[#fdba74] leading-tight">Backward Hindcast</div>
+                        </div>
+                    `;
+                    originMarkerRef.current = new maplibregl.Marker({
+                        element: el,
+                        anchor: "top-left",
+                        offset: [12, 8],
+                    })
+                        .setLngLat(hindcastOriginLonLat)
+                        .addTo(map);
+                } else {
+                    originMarkerRef.current.setLngLat(hindcastOriginLonLat);
+                }
+            } else {
+                originMarkerRef.current?.remove();
+                originMarkerRef.current = null;
+            }
+
+            // --- HTML CALLOUT 3: 24h Forecast Centroid Label ---
+            if (showForecast && forecastCentroidLonLat) {
+                if (!forecastMarkerRef.current) {
+                    const el = document.createElement("div");
+                    el.className = "pointer-events-none select-none flex items-center gap-2";
+                    el.innerHTML = `
+                        <div class="relative flex items-center justify-center">
+                            <div class="absolute w-5 h-5 rounded-full bg-[#06b6d4]/35 animate-pulse"></div>
+                            <div class="w-3 h-3 rounded-full bg-[#22d4ee] border-2 border-white shadow-[0_0_8px_rgba(34,211,238,0.85)]"></div>
+                        </div>
+                        <div class="bg-[#050f1d]/90 border border-[#06b6d4]/50 rounded px-2 py-0.5 shadow-lg backdrop-blur-sm">
+                            <div class="text-[8.5px] font-bold text-[#22d4ee] leading-tight">24h Forecast</div>
+                            <div class="text-[8px] font-medium text-[#a5f3fc] leading-tight">Centroid</div>
+                        </div>
+                    `;
+                    forecastMarkerRef.current = new maplibregl.Marker({ element: el, anchor: "left" })
+                        .setLngLat(forecastCentroidLonLat)
+                        .addTo(map);
+                } else {
+                    forecastMarkerRef.current.setLngLat(forecastCentroidLonLat);
+                }
+            } else {
+                forecastMarkerRef.current?.remove();
+                forecastMarkerRef.current = null;
+            }
+
+            // First identification camera animation (runs strictly once on first identification)
+            if (isIdentifying && !hasFlownRef.current) {
+                hasFlownRef.current = true;
+                map.flyTo({
+                    center: [spillCentroidLonLat[0], spillCentroidLonLat[1]],
+                    zoom: 8.4,
+                    duration: 700,
+                });
             }
         };
 
         if (map.isStyleLoaded()) drawData();
         else map.once("load", drawData);
-    }, [region, spillId, analysis, investigationTab, aisTracks, highlightedVesselId, cawActive, winningVesselId, isIdentifying, identifyRun, identified, ensureLayers]);
+    }, [region, spillId, analysis, investigationTab, aisTracks, highlightedVesselId, cawActive, winningVesselId, decision, isIdentifying, identifyRun, identified, alphaSurface, suspects, layerVisibility, ensureLayers]);
 
-    // --- Vessel click handler: register once, update via ref to avoid stacking ---
+    // Vessel click handler
     useEffect(() => {
         const map = mapRef.current;
         if (!map) return;
@@ -437,14 +1414,19 @@ export function MapView({
             if (!Number.isNaN(vesselId) && onVesselSelect) {
                 onVesselSelect(vesselId);
             }
-            // Show compact info popup
             const content = document.createElement("div");
-            content.className = "text-xs leading-5";
-            content.innerHTML = `<strong style="color:#e8f0f5">${String(props.vesselName ?? "Vessel")}</strong><br/><span style="color:#7a9ab0">${String(props.vesselType ?? "Unknown")} · ${String(props.flag ?? "Unknown")}</span><br/><span style="color:#5a7d96;font-size:10px">${String(props.speedKnots)} kn · ${String(props.courseDegrees)}°</span>`;
-            new maplibregl.Popup({ closeButton: true, offset: 10 }).setLngLat(feature.geometry.coordinates as [number, number]).setDOMContent(content).addTo(map);
+            content.className = "text-xs leading-5 p-1";
+            content.innerHTML = `
+                <div style="color:#f8fafc;font-weight:700;font-size:12px">${String(props.vesselName ?? `Vessel ${vesselId}`)}</div>
+                <div style="color:#7ab8d0;font-size:10px">${String(props.vesselType ?? "Unknown")} · ${String(props.flag ?? "Unknown")}</div>
+                <div style="color:#f59e0b;font-family:monospace;font-size:10px;margin-top:2px">MMSI ${vesselId} · ${String(props.speedKnots)} kn</div>
+            `;
+            new maplibregl.Popup({ closeButton: true, offset: 12 })
+                .setLngLat(feature.geometry.coordinates as [number, number])
+                .setDOMContent(content)
+                .addTo(map);
         };
 
-        // Register once only
         if (!clickHandlerRef.current) {
             map.on("click", "ais-vessel-markers", handler);
             clickHandlerRef.current = handler;
@@ -453,147 +1435,15 @@ export function MapView({
         map.on("mouseleave", "ais-vessel-markers", () => { map.getCanvas().style.cursor = ""; });
     }, [onVesselSelect]);
 
-    // --- Spill layer visibility follows activeLayer ---
-    useEffect(() => {
-        const map = mapRef.current;
-        if (!map || !map.isStyleLoaded()) return;
-        ["region-fill", "region-line", "spill-fill", "spill-outline", "spill-centroid", "spill-centroid-ring", "spill-label"].forEach((layerId) => {
-            if (map.getLayer(layerId)) map.setLayoutProperty(layerId, "visibility", "visible");
-        });
-    }, [activeLayer]);
-
     return (
         <div className="absolute inset-0">
             <div className="absolute inset-0" ref={containerRef} />
-
-            {/* Top-Left: Tactical Sector & Live Coordinate telemetry */}
-            <div className="pointer-events-none absolute left-3 top-3 z-10 flex items-center gap-2.5 rounded border border-[#1b344b] bg-[#030d17]/90 px-3 py-1.5 shadow-md backdrop-blur-sm">
-                <span className="h-1.5 w-1.5 rounded-full bg-[#10b981] animate-pulse" />
-                <span className="text-[9.5px] font-semibold uppercase tracking-[.14em] text-[#7ab8d0]">
-                    {region?.name ?? "Arabian Sea"} Sector
-                </span>
-                <span className="text-[#334e68]">|</span>
-                <span className="font-mono text-[9.5px] font-medium text-[#a8d4f0]">
-                    {cursorCoords ? (
-                        <>
-                            <span>{cursorCoords.lat.toFixed(3)}°N</span>
-                            <span className="mx-1.5 text-[#334e68]">·</span>
-                            <span>{cursorCoords.lon.toFixed(3)}°E</span>
-                        </>
-                    ) : analysis ? (
-                        <>
-                            <span>{analysis.detection.centroid_latlon.lat.toFixed(2)}°N</span>
-                            <span className="mx-1.5 text-[#334e68]">·</span>
-                            <span>{analysis.detection.centroid_latlon.lon.toFixed(2)}°E</span>
-                        </>
-                    ) : (
-                        <span>75.77°E · 9.50°N</span>
-                    )}
-                </span>
-            </div>
-
-            {/* Bottom-Left: Tactical Map Legend */}
-            <div className="pointer-events-none absolute bottom-3 left-3 z-10 hidden rounded border border-[#1b344b] bg-[#030d17]/92 p-3 shadow-lg backdrop-blur-sm sm:block">
-                <div className="mb-2 flex items-center justify-between gap-4 border-b border-[#1b344b]/80 pb-1.5">
-                    <p className="text-[8.5px] font-bold uppercase tracking-[.18em] text-[#5a7d96]">
-                        Tactical Hierarchy
-                    </p>
-                    <span className="font-mono text-[8px] text-[#00d4ff]">LIVE GIS</span>
-                </div>
-                <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-[9px]">
-                    <span className="flex items-center gap-1.5">
-                        <span className="inline-block h-2 w-2 rounded-sm bg-[#ef4444] border border-[#fca5a5]" />
-                        <span className="font-semibold text-[#f8fafc]">Spill Detection</span>
-                    </span>
-                    <span className="flex items-center gap-1.5">
-                        <span className="inline-block h-2 w-2 rounded-full bg-[#0284c7] border border-[#7dd3fc]" />
-                        <span className="text-[#cbd5e1]">Hindcast Origin</span>
-                    </span>
-                    <span className="flex items-center gap-1.5">
-                        <span className="inline-block h-2 w-2 rounded-sm border border-dashed border-[#06b6d4] bg-[#06b6d4]/20" />
-                        <span className="text-[#cbd5e1]">Forecast Envelope</span>
-                    </span>
-                    <span className="flex items-center gap-1.5">
-                        <span className="inline-block h-2 w-2 rounded-full bg-[#22d4ee]" />
-                        <span className="text-[#cbd5e1]">Forecast Centroid</span>
-                    </span>
-                    <span className="flex items-center gap-1.5">
-                        <span className="inline-block h-0.5 w-3 bg-[#f59e0b]" />
-                        <span className="font-semibold text-[#f59e0b]">Winner Path</span>
-                    </span>
-                    <span className="flex items-center gap-1.5">
-                        <span className="inline-block h-0.5 w-3 bg-[#475569]" />
-                        <span className="text-[#64748b]">AIS Vessel Track</span>
-                    </span>
-                </div>
-                {/* Scale reference bar */}
-                <div className="mt-2.5 flex items-center justify-between border-t border-[#1b344b]/60 pt-1.5 font-mono text-[8px] text-[#5a7d96]">
-                    <span>0</span>
-                    <div className="mx-2 h-1 flex-1 border-b border-l border-r border-[#334e68]" />
-                    <span>40 km</span>
-                </div>
-            </div>
-
-            {/* Bottom-Right: Tactical Map Controls */}
-            <div className="absolute bottom-3 right-3 z-20 flex flex-col gap-1.5">
-                {/* Compass / Reset North */}
-                <button
-                    type="button"
-                    onClick={() => mapRef.current?.resetNorthPitch({ duration: 400 })}
-                    className="flex h-8 w-8 items-center justify-center rounded border border-[#1b344b] bg-[#030d17]/90 text-[#7ab8d0] shadow-md backdrop-blur-sm transition hover:border-[#00d4ff]/50 hover:bg-[#0c2438] hover:text-[#00d4ff]"
-                    title="Reset North & Pitch"
-                >
-                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none">
-                        <polygon points="12 2 18 21 12 17 6 21 12 2" fill="#ef4444" />
-                        <polygon points="12 17 18 21 12 2" fill="#64748b" />
-                    </svg>
-                </button>
-
-                {/* Recenter on Spill Centroid */}
-                <button
-                    type="button"
-                    onClick={() => {
-                        if (analysis && mapRef.current) {
-                            mapRef.current.flyTo({
-                                center: [analysis.detection.centroid_latlon.lon, analysis.detection.centroid_latlon.lat],
-                                zoom: 8.5,
-                                duration: 600,
-                            });
-                        }
-                    }}
-                    className="flex h-8 w-8 items-center justify-center rounded border border-[#1b344b] bg-[#030d17]/90 text-[#7ab8d0] shadow-md backdrop-blur-sm transition hover:border-[#00d4ff]/50 hover:bg-[#0c2438] hover:text-[#00d4ff]"
-                    title="Recenter on Spill Incident"
-                >
-                    <span className="text-sm leading-none">⌖</span>
-                </button>
-
-                {/* Zoom In */}
-                <button
-                    type="button"
-                    onClick={() => mapRef.current?.zoomIn({ duration: 250 })}
-                    className="flex h-8 w-8 items-center justify-center rounded border border-[#1b344b] bg-[#030d17]/90 text-[#7ab8d0] shadow-md backdrop-blur-sm transition hover:border-[#00d4ff]/50 hover:bg-[#0c2438] hover:text-[#00d4ff]"
-                    title="Zoom In"
-                >
-                    <span className="text-base font-bold leading-none">+</span>
-                </button>
-
-                {/* Zoom Out */}
-                <button
-                    type="button"
-                    onClick={() => mapRef.current?.zoomOut({ duration: 250 })}
-                    className="flex h-8 w-8 items-center justify-center rounded border border-[#1b344b] bg-[#030d17]/90 text-[#7ab8d0] shadow-md backdrop-blur-sm transition hover:border-[#00d4ff]/50 hover:bg-[#0c2438] hover:text-[#00d4ff]"
-                    title="Zoom Out"
-                >
-                    <span className="text-base font-bold leading-none">−</span>
-                </button>
-            </div>
-
-            {/* Error banner */}
             {loadError && (
                 <div className="pointer-events-none absolute bottom-3 right-14 z-10 rounded border border-[#ef4444]/40 bg-[#030d17]/95 px-3 py-1.5 text-[10px] text-[#ef4444]">
-                    API data unavailable · basemap active
+                    API data unavailable · local maritime basemap active
                 </div>
             )}
         </div>
     );
 }
+

@@ -8,6 +8,32 @@ interface IncidentRailProps {
     identifyError?: boolean;
     custodes?: CustodesStatusResponse | null;
     alphaSurface?: AlphaSurfaceResponse | null;
+    identifiedAt?: string | null;
+}
+
+function formatUtcDateTime(timestampSeconds?: number | null): string {
+    if (!timestampSeconds || Number.isNaN(timestampSeconds)) return "—";
+    const date = new Date(timestampSeconds * 1000);
+    if (Number.isNaN(date.getTime())) return "—";
+    const day = String(date.getUTCDate()).padStart(2, "0");
+    const month = date.toLocaleString("en-GB", { month: "short", timeZone: "UTC" }).toUpperCase();
+    const year = date.getUTCFullYear();
+    const time = date.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", timeZone: "UTC" });
+    return `${day} ${month} ${year} / ${time} UTC`;
+}
+
+function formatUtcTime(timestampSeconds?: number | null): string {
+    if (!timestampSeconds || Number.isNaN(timestampSeconds)) return "—";
+    const date = new Date(timestampSeconds * 1000);
+    if (Number.isNaN(date.getTime())) return "—";
+    return date.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", timeZone: "UTC" }) + " UTC";
+}
+
+function formatIsoUtcTime(isoString?: string | null): string {
+    if (!isoString) return "—";
+    const date = new Date(isoString);
+    if (Number.isNaN(date.getTime())) return "—";
+    return date.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", second: "2-digit", timeZone: "UTC" }) + " UTC";
 }
 
 export function IncidentRail({
@@ -17,31 +43,127 @@ export function IncidentRail({
     identified = false,
     identifyError = false,
     custodes = null,
+    alphaSurface = null,
+    identifiedAt = null,
 }: IncidentRailProps) {
-    const lat = analysis ? analysis.detection.centroid_latlon.lat.toFixed(2) : "9.12";
-    const lon = analysis ? analysis.detection.centroid_latlon.lon.toFixed(2) : "75.36";
-    const topScore = custodes?.top_vessel_score != null ? `${(custodes.top_vessel_score * 100).toFixed(1)}%` : "90.8%";
-    const nullScore = custodes?.null_alpha != null ? `${(custodes.null_alpha * 100).toFixed(2)}%` : "9.16%";
-    const winnerMmsi = custodes?.top_vessel != null ? `MMSI ${custodes.top_vessel}` : "MMSI 200000000";
+    // 1. Truthful Incident Overview extraction from analysis response
+    const detectionTimestamp = analysis?.detection?.detection_timestamp ?? null;
+    const detectionTimeText = formatUtcDateTime(detectionTimestamp);
+
+    const confidenceText =
+        analysis?.detection?.confidence !== undefined && analysis?.detection?.confidence !== null
+            ? `${(analysis.detection.confidence * 100).toFixed(1)}%`
+            : "—";
+
+    const coordsText =
+        analysis?.detection?.centroid_latlon
+            ? `${analysis.detection.centroid_latlon.lat.toFixed(4)}°N · ${analysis.detection.centroid_latlon.lon.toFixed(4)}°E`
+            : "—";
+
+    const areaText =
+        analysis?.detection?.physical_area_km2 !== undefined && analysis?.detection?.physical_area_km2 !== null
+            ? `${analysis.detection.physical_area_km2.toFixed(2)} km²`
+            : "—";
+
+    const ageText =
+        analysis?.age_estimate_hours !== undefined && analysis?.age_estimate_hours !== null
+            ? `${analysis.age_estimate_hours.toFixed(1)} h`
+            : "—";
+
+    // 2. Key Metrics logic
+    const isAnalyzing = identifyLoading;
+    const isIdentified = identified && custodes !== null && !identifyLoading;
+    const isAbstain = isIdentified && (custodes.decision === "ABSTAIN" || custodes.top_vessel === null);
+
+    // Top Vessel Score
+    let topVesselScoreText = "—";
+    if (isAnalyzing) {
+        topVesselScoreText = "ANALYZING…";
+    } else if (isIdentified) {
+        if (isAbstain) {
+            topVesselScoreText = "—";
+        } else if (custodes.top_vessel_score !== null && custodes.top_vessel_score !== undefined) {
+            topVesselScoreText = `${(custodes.top_vessel_score * 100).toFixed(1)}%`;
+        }
+    }
+
+    // Null Hypothesis
+    const nullAlphaVal = custodes?.null_alpha ?? alphaSurface?.null_alpha ?? null;
+    let nullHypothesisText = "—";
+    if (isAnalyzing) {
+        nullHypothesisText = "ANALYZING…";
+    } else if (isIdentified && nullAlphaVal !== null && nullAlphaVal !== undefined) {
+        nullHypothesisText = `${(nullAlphaVal * 100).toFixed(2)}%`;
+    }
+
+    // CAW Winner
+    let cawWinnerText = "—";
+    if (isAnalyzing) {
+        cawWinnerText = "ANALYZING…";
+    } else if (isIdentified) {
+        if (isAbstain) {
+            cawWinnerText = "None — abstained";
+        } else if (custodes.top_vessel !== null && custodes.top_vessel !== undefined) {
+            cawWinnerText = `MMSI ${custodes.top_vessel}`;
+        } else {
+            cawWinnerText = "None — abstained";
+        }
+    }
+
+    // 3. Pipeline Timestamps for Latest Updates
+    const detectionStageTime = formatUtcTime(detectionTimestamp);
+
+    const hindcastOriginTs =
+        detectionTimestamp !== null && analysis?.backward_hindcast?.hypothesized_t0_hours_before_detection !== undefined
+            ? detectionTimestamp - analysis.backward_hindcast.hypothesized_t0_hours_before_detection * 3600
+            : null;
+    const hindcastStageTime = formatUtcTime(hindcastOriginTs);
+
+    const forecastTs = detectionTimestamp !== null ? detectionTimestamp + 24 * 3600 : null;
+    const forecastStageTime = formatUtcTime(forecastTs);
+
+    const identificationStageTime = isAnalyzing
+        ? "ANALYZING…"
+        : isIdentified && identifiedAt
+        ? formatIsoUtcTime(identifiedAt)
+        : "—";
 
     return (
-        <aside className="flex w-full shrink-0 flex-col overflow-y-auto rounded-xl border border-[#15293e] bg-[#071322] p-4 text-[#cbd5e1] shadow-xl lg:w-[290px] xl:w-[310px]">
-            {/* Header */}
+        <aside className="flex w-full shrink-0 flex-col overflow-y-auto rounded-xl border border-[#15293e] bg-[#071322] p-3.5 text-[#cbd5e1] shadow-xl lg:w-[290px] xl:w-[310px]">
+            {/* 1. INCIDENT OVERVIEW */}
             <div>
                 <p className="text-[11px] font-bold uppercase tracking-[.18em] text-[#7ab8d0]">
                     Incident Overview
                 </p>
-                <div className="mt-1 flex items-center gap-2">
-                    <span className="h-2 w-2 rounded-full bg-[#ef4444] animate-pulse" />
-                    <span className="text-sm font-bold text-[#ef4444]">Oil Spill Detected</span>
+                <div className="mt-1.5 flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                        <span className="h-2 w-2 rounded-full bg-[#ef4444] animate-pulse" />
+                        <span className="text-sm font-bold text-[#ef4444]">Oil Spill Detected</span>
+                    </div>
+                    {confidenceText !== "—" && (
+                        <span className="rounded border border-[#ef4444]/40 bg-[#ef4444]/15 px-1.5 py-0.5 font-mono text-[8.5px] font-semibold text-[#fca5a5]">
+                            {confidenceText} conf
+                        </span>
+                    )}
                 </div>
-                <div className="mt-1 flex items-center gap-3 text-[10px] text-[#62859e]">
-                    <span>06 SEP 2026 / 12:42 UTC</span>
-                </div>
-                <div className="mt-0.5 flex items-center gap-1 font-mono text-[10px] text-[#8aaec4]">
-                    <span>📍</span>
-                    <span>{lat}° N</span>
-                    <span>{lon}° E</span>
+
+                <div className="mt-2.5 space-y-1.5 text-[10px]">
+                    <div className="flex items-center justify-between border-b border-[#1b344b]/60 pb-1">
+                        <span className="text-[#62859e]">Detected at</span>
+                        <span className="font-mono text-[#cbd5e1]">{detectionTimeText}</span>
+                    </div>
+                    <div className="flex items-center justify-between border-b border-[#1b344b]/60 pb-1">
+                        <span className="text-[#62859e]">Coordinates</span>
+                        <span className="font-mono text-[#8aaec4]">{coordsText}</span>
+                    </div>
+                    <div className="flex items-center justify-between border-b border-[#1b344b]/60 pb-1">
+                        <span className="text-[#62859e]">Spill area</span>
+                        <span className="font-mono font-semibold text-[#f8fafc]">{areaText}</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                        <span className="text-[#62859e]">Estimated age</span>
+                        <span className="font-mono text-[#cbd5e1]">{ageText}</span>
+                    </div>
                 </div>
             </div>
 
@@ -54,7 +176,7 @@ export function IncidentRail({
                         backgroundImage: `radial-gradient(circle at 45% 50%, rgba(2, 132, 199, 0.4), transparent 60%), radial-gradient(circle at 50% 50%, rgba(220, 38, 38, 0.5), transparent 30%), linear-gradient(135deg, #021a30 0%, #032d52 50%, #011424 100%)`,
                     }}
                 />
-                {/* Red Detection Bounding Box from reference */}
+                {/* Red Detection Bounding Box */}
                 <div className="absolute left-[38%] top-[30%] h-9 w-9 rounded-sm border-2 border-[#ef4444] shadow-[0_0_8px_rgba(239,68,68,0.6)] flex items-center justify-center">
                     <span className="h-1.5 w-1.5 rounded-full bg-[#ef4444]" />
                 </div>
@@ -65,83 +187,201 @@ export function IncidentRail({
                 </span>
             </div>
 
-            {/* Latest Updates Timeline */}
+            {/* 2. KEY METRICS (2x2 Grid) */}
+            <div className="mt-4">
+                <p className="mb-2 text-[10px] font-bold uppercase tracking-wider text-[#7ab8d0]">
+                    Key Metrics
+                </p>
+                <div className="grid grid-cols-2 gap-2">
+                    {/* Top Vessel Score */}
+                    <div className="rounded-lg border border-[#1b344b] bg-[#030d17] p-2.5">
+                        <p className="text-[8.5px] font-semibold uppercase tracking-wider text-[#62859e]">
+                            Top Vessel Score
+                        </p>
+                        <p
+                            className={`mt-1 font-mono text-base font-bold ${
+                                isAnalyzing
+                                    ? "text-[11px] text-[#00d4ff] animate-pulse"
+                                    : isAbstain || topVesselScoreText === "—"
+                                    ? "text-[#64748b]"
+                                    : "text-[#10b981]"
+                            }`}
+                        >
+                            {topVesselScoreText}
+                        </p>
+                    </div>
+
+                    {/* Null Hypothesis */}
+                    <div className="rounded-lg border border-[#1b344b] bg-[#030d17] p-2.5">
+                        <p className="text-[8.5px] font-semibold uppercase tracking-wider text-[#62859e]">
+                            Null Hypothesis
+                        </p>
+                        <p
+                            className={`mt-1 font-mono text-base font-bold ${
+                                isAnalyzing
+                                    ? "text-[11px] text-[#00d4ff] animate-pulse"
+                                    : nullHypothesisText === "—"
+                                    ? "text-[#64748b]"
+                                    : "text-[#f8fafc]"
+                            }`}
+                        >
+                            {nullHypothesisText}
+                        </p>
+                    </div>
+
+                    {/* CAW Winner */}
+                    <div className="rounded-lg border border-[#1b344b] bg-[#030d17] p-2.5">
+                        <p className="text-[8.5px] font-semibold uppercase tracking-wider text-[#62859e]">
+                            CAW Winner
+                        </p>
+                        <p
+                            className={`mt-1 font-mono text-[11px] font-bold truncate ${
+                                isAnalyzing
+                                    ? "text-[#00d4ff] animate-pulse"
+                                    : isAbstain
+                                    ? "text-[#ef4444]"
+                                    : cawWinnerText === "—"
+                                    ? "text-[#64748b]"
+                                    : "text-[#f59e0b]"
+                            }`}
+                            title={cawWinnerText}
+                        >
+                            {cawWinnerText}
+                        </p>
+                    </div>
+
+                    {/* Alpha Surface */}
+                    <div className="rounded-lg border border-[#1b344b] bg-[#030d17] p-2.5">
+                        <p className="text-[8.5px] font-semibold uppercase tracking-wider text-[#62859e]">
+                            Alpha Surface
+                        </p>
+                        <p className="mt-1 font-mono text-sm font-bold text-[#f8fafc]">
+                            20 × 30 km
+                        </p>
+                    </div>
+                </div>
+            </div>
+
+            {/* 3. LATEST UPDATES (4 Pipeline Stages) */}
             <div className="mt-4">
                 <div className="flex items-center justify-between">
                     <p className="text-[10px] font-bold uppercase tracking-wider text-[#7ab8d0]">
                         Latest Updates
                     </p>
                     <span className="flex items-center gap-1 rounded bg-[#10b981]/15 border border-[#10b981]/40 px-1.5 py-0.5 text-[8.5px] font-bold text-[#10b981]">
-                        Live <span className="text-[9px]">⟳</span>
+                        Pipeline <span className="text-[9px]">✓</span>
                     </span>
                 </div>
 
-                <div className="mt-2.5 space-y-2 border-l border-[#1b344b] pl-3 text-[9.5px]">
-                    <div className="relative">
-                        <span className="absolute -left-[16px] top-1 h-2 w-2 rounded-full border border-[#00d4ff] bg-[#00d4ff] shadow-[0_0_6px_rgba(0,212,255,0.8)]" />
-                        <div className="flex items-center justify-between">
-                            <span className="font-semibold text-[#f8fafc]">CAW Analysis Completed</span>
-                            <span className="font-mono text-[8px] text-[#62859e]">09:21 UTC</span>
-                        </div>
-                        <p className="text-[8.5px] text-[#7ab8d0]">Top vessel identified with 90.8% score</p>
-                    </div>
-
+                <div className="mt-2.5 space-y-2.5 border-l border-[#1b344b] pl-3 text-[9.5px]">
+                    {/* Stage 1: DETECTION */}
                     <div className="relative">
                         <span className="absolute -left-[16px] top-1 h-2 w-2 rounded-full border border-[#0284c7] bg-[#0284c7]" />
                         <div className="flex items-center justify-between">
-                            <span className="font-semibold text-[#cbd5e1]">Alpha Surface Generated</span>
-                            <span className="font-mono text-[8px] text-[#62859e]">09:18 UTC</span>
+                            <span className="font-semibold text-[#f8fafc]">
+                                Detection
+                            </span>
+                            <span className="font-mono text-[8px] text-[#62859e]">
+                                {detectionStageTime}
+                            </span>
                         </div>
-                        <p className="text-[8.5px] text-[#62859e]">20 × 30 km resolution</p>
+                        <p className="text-[8.5px] text-[#62859e]">
+                            SAR slick boundary & centroid resolved
+                        </p>
                     </div>
 
+                    {/* Stage 2: HINDCAST */}
                     <div className="relative">
                         <span className="absolute -left-[16px] top-1 h-2 w-2 rounded-full border border-[#0284c7] bg-[#0284c7]" />
                         <div className="flex items-center justify-between">
-                            <span className="font-semibold text-[#cbd5e1]">Hindcast Origin Estimated</span>
-                            <span className="font-mono text-[8px] text-[#62859e]">09:12 UTC</span>
+                            <span className="font-semibold text-[#cbd5e1]">
+                                Hindcast
+                            </span>
+                            <span className="font-mono text-[8px] text-[#62859e]">
+                                {hindcastStageTime}
+                            </span>
                         </div>
-                        <p className="text-[8.5px] text-[#62859e]">Backtracking complete</p>
+                        <p className="text-[8.5px] text-[#62859e]">
+                            {analysis?.backward_hindcast
+                                ? `Reverse drift simulation (t₀ = -${analysis.backward_hindcast.hypothesized_t0_hours_before_detection.toFixed(1)}h)`
+                                : "Backward trajectory estimated"}
+                        </p>
                     </div>
 
+                    {/* Stage 3: FORECAST */}
                     <div className="relative">
                         <span className="absolute -left-[16px] top-1 h-2 w-2 rounded-full border border-[#0284c7] bg-[#0284c7]" />
                         <div className="flex items-center justify-between">
-                            <span className="font-semibold text-[#cbd5e1]">Forecast (24h) Available</span>
-                            <span className="font-mono text-[8px] text-[#62859e]">09:08 UTC</span>
+                            <span className="font-semibold text-[#cbd5e1]">
+                                Forecast
+                            </span>
+                            <span className="font-mono text-[8px] text-[#62859e]">
+                                {forecastStageTime}
+                            </span>
                         </div>
-                        <p className="text-[8.5px] text-[#62859e]">Drift prediction + uncertainty</p>
+                        <p className="text-[8.5px] text-[#62859e]">
+                            24h forward trajectory & uncertainty
+                        </p>
+                    </div>
+
+                    {/* Stage 4: IDENTIFICATION */}
+                    <div className="relative">
+                        <span
+                            className={`absolute -left-[16px] top-1 h-2 w-2 rounded-full border ${
+                                isAnalyzing
+                                    ? "border-[#00d4ff] bg-[#00d4ff] animate-ping"
+                                    : isIdentified
+                                    ? isAbstain
+                                        ? "border-[#ef4444] bg-[#ef4444]"
+                                        : "border-[#10b981] bg-[#10b981] shadow-[0_0_6px_rgba(16,185,129,0.8)]"
+                                    : "border-[#1b344b] bg-[#071322]"
+                            }`}
+                        />
+                        <div className="flex items-center justify-between">
+                            <span
+                                className={`font-semibold ${
+                                    isAnalyzing
+                                        ? "text-[#00d4ff]"
+                                        : isIdentified
+                                        ? "text-[#f8fafc]"
+                                        : "text-[#62859e]"
+                                }`}
+                            >
+                                Identification
+                            </span>
+                            <span
+                                className={`font-mono text-[8px] ${
+                                    isAnalyzing ? "text-[#00d4ff] animate-pulse" : "text-[#62859e]"
+                                }`}
+                            >
+                                {identificationStageTime}
+                            </span>
+                        </div>
+                        <p
+                            className={`text-[8.5px] ${
+                                isAnalyzing
+                                    ? "text-[#7ab8d0]"
+                                    : isIdentified
+                                    ? isAbstain
+                                        ? "text-[#ef4444]"
+                                        : "text-[#7ab8d0]"
+                                    : "text-[#475569]"
+                            }`}
+                        >
+                            {isAnalyzing
+                                ? "Resolving candidate attribution…"
+                                : isIdentified
+                                ? isAbstain
+                                    ? "Custodes decision: ABSTAIN (no confident match)"
+                                    : `Custodes decision: ${custodes?.decision ?? "COMMIT"}`
+                                : "Awaiting identification run"}
+                        </p>
                     </div>
                 </div>
             </div>
 
-            {/* Key Metrics 2x2 Grid */}
-            <div className="mt-4">
-                <p className="text-[10px] font-bold uppercase tracking-wider text-[#7ab8d0] mb-2">
-                    Key Metrics
-                </p>
-                <div className="grid grid-cols-2 gap-2">
-                    <div className="rounded-lg border border-[#1b344b] bg-[#030d17] p-2.5">
-                        <p className="text-[8.5px] text-[#62859e]">Top Vessel Score</p>
-                        <p className="mt-0.5 font-mono text-base font-bold text-[#10b981]">{topScore}</p>
-                    </div>
-                    <div className="rounded-lg border border-[#1b344b] bg-[#030d17] p-2.5">
-                        <p className="text-[8.5px] text-[#62859e]">Null Hypothesis</p>
-                        <p className="mt-0.5 font-mono text-base font-bold text-[#f8fafc]">{nullScore}</p>
-                    </div>
-                    <div className="rounded-lg border border-[#1b344b] bg-[#030d17] p-2.5">
-                        <p className="text-[8.5px] text-[#62859e]">CAW Winner</p>
-                        <p className="mt-0.5 font-mono text-[11px] font-bold text-[#f59e0b] truncate">{winnerMmsi}</p>
-                    </div>
-                    <div className="rounded-lg border border-[#1b344b] bg-[#030d17] p-2.5">
-                        <p className="text-[8.5px] text-[#62859e]">Alpha Surface</p>
-                        <p className="mt-0.5 font-mono text-[11px] font-bold text-[#f8fafc]">20 × 30 km</p>
-                    </div>
-                </div>
-            </div>
-
-            {/* Action Button: RE-RUN IDENTIFICATION */}
-            <div className="mt-4 pt-2">
+            {/* 4. ACTION BUTTON: IDENTIFY SUSPECTS / RE-RUN IDENTIFICATION */}
+            <div className="mt-4 pt-2 border-t border-[#1b344b]/60">
                 <button
                     type="button"
                     onClick={onIdentifySuspects}
@@ -149,14 +389,26 @@ export function IncidentRail({
                     className={`w-full flex items-center justify-center gap-2 rounded-lg py-2.5 px-4 text-xs font-bold uppercase tracking-wider transition-all shadow-lg ${
                         identifyLoading
                             ? "bg-[#0b2238] text-[#62859e] border border-[#1b344b] cursor-wait"
+                            : identified
+                            ? "bg-[#0070f3]/20 hover:bg-[#0070f3] text-[#38bdf8] hover:text-white border border-[#0070f3]/60"
                             : "bg-[#0070f3] hover:bg-[#0060df] text-white shadow-[0_0_15px_rgba(0,112,243,0.3)]"
                     }`}
                 >
-                    <span>⟳</span>
-                    <span>{identifyLoading ? "IDENTIFYING…" : identified ? "RE-RUN IDENTIFICATION" : "IDENTIFY SUSPECTS"}</span>
+                    <span className={identifyLoading ? "animate-spin" : ""}>⟳</span>
+                    <span>
+                        {identifyLoading
+                            ? "IDENTIFYING…"
+                            : identified
+                            ? "RE-RUN IDENTIFICATION"
+                            : "IDENTIFY SUSPECTS"}
+                    </span>
                 </button>
                 <p className="mt-1.5 text-center font-mono text-[8.5px] text-[#5a7d96]">
-                    Last run: 09:21 UTC
+                    {identifyLoading
+                        ? "Executing CAW Cross-Attention analysis…"
+                        : isIdentified && identifiedAt
+                        ? `Resolved at ${formatIsoUtcTime(identifiedAt)}`
+                        : "Standby · Ready to identify"}
                 </p>
                 {identifyError && (
                     <p className="mt-1 text-center text-[8.5px] text-[#ef4444]">

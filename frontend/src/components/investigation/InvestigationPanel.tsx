@@ -1,15 +1,12 @@
-import type { AlphaSurfaceResponse, CustodesStatusResponse, SpillAnalysis, SuspectCandidate } from "../../types/intelligence";
+import {
+    CUSTODES_CHECKPOINT_PRECISION,
+    type AlphaSurfaceResponse,
+    type CustodesStatusResponse,
+    type SpillAnalysis,
+    type SuspectCandidate,
+} from "../../types/intelligence";
 import { AlphaSurfaceHeatmap } from "./AlphaSurfaceHeatmap";
 import { CustodesCard } from "./CustodesCard";
-
-function formatUtcTimestamp(timestamp: number): string {
-    return new Date(timestamp * 1000).toLocaleString("en-GB", { dateStyle: "short", timeStyle: "short", timeZone: "UTC" }) + " UTC";
-}
-
-function formatScore(score: number | null): string {
-    if (score === null) return "N/A";
-    return String(Math.round(score * 100));
-}
 
 interface InvestigationPanelProps {
     activeTab: string;
@@ -78,34 +75,6 @@ function InvestigationTimeline({ detectionTime }: { detectionTime: string | null
     );
 }
 
-// Fallback data when API has not yet responded or on initial load to match reference image
-const fallbackCustodes: CustodesStatusResponse = {
-    spill_id: 1,
-    decision: "COMMIT",
-    top_vessel: 200000000,
-    top_vessel_score: 0.908,
-    second_vessel: null,
-    second_vessel_score: 0.092,
-    margin: 9.16,
-    same_vessel_top2_rows: true,
-    null_alpha: 0.0916,
-    abstain_flag: false,
-};
-
-const fallbackAlphaSurface: AlphaSurfaceResponse = {
-    spill_id: 1,
-    vessel_ids: [200000000, 200000001, 200000002, 200000003, 200000004],
-    t0_hours: [0, 6, 12, 18, 24, 30, 36, 42, 48, 54, 60, 66, 72],
-    alpha: [
-        [0.02, 0.05, 0.12, 0.28, 0.65, 0.908, 0.82, 0.55, 0.31, 0.15, 0.06, 0.02, 0.0],
-        [0.01, 0.02, 0.03, 0.034, 0.02, 0.01, 0.01, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-        [0.0, 0.01, 0.018, 0.01, 0.01, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-        [0.0, 0.0, 0.012, 0.01, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-        [0.0, 0.0, 0.008, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-    ],
-    null_alpha: 0.0916,
-};
-
 export function InvestigationPanel({
     activeTab,
     onTabChange,
@@ -117,31 +86,73 @@ export function InvestigationPanel({
     alphaSurface,
     custodes,
     winningVesselId,
+    identified,
+    onIdentifySuspects,
+    identifyLoading,
+    identifyError,
 }: InvestigationPanelProps) {
-    const effectiveCustodes = custodes ?? fallbackCustodes;
-    const effectiveAlphaSurface = alphaSurface ?? fallbackAlphaSurface;
-
-    // Candidate list for confidence scores
-    const candidateList =
-        suspects.length > 0
-            ? suspects.slice(0, 5).map((s) => ({
-                  id: s.vessel_id,
-                  mmsi: String(s.vessel_id),
-                  name: s.vessel_name,
-                  score: s.overall_score > 1 ? s.overall_score / 100 : s.overall_score,
-              }))
-            : [
-                  { id: 200000000, mmsi: "200000000", name: "Top Candidate", score: 0.908 },
-                  { id: 200000001, mmsi: "200000001", name: "Candidate 200000001", score: 0.034 },
-                  { id: 200000002, mmsi: "200000002", name: "Candidate 200000002", score: 0.018 },
-                  { id: 200000003, mmsi: "200000003", name: "Candidate 200000003", score: 0.012 },
-                  { id: 200000004, mmsi: "200000004", name: "Candidate 200000004", score: 0.008 },
-              ];
-
     const isIntelligenceHome = activeTab === "Overview" || activeTab === "Suspects";
 
+    // Top 5 candidates sorted strictly by backend overall_score descending
+    const sortedSuspects = [...suspects].sort((a, b) => b.overall_score - a.overall_score).slice(0, 5);
+    const maxScore = sortedSuspects.length > 0 && sortedSuspects[0].overall_score > 0 ? sortedSuspects[0].overall_score : 1;
+
     return (
-        <aside className="flex w-full shrink-0 flex-col gap-3 overflow-y-auto rounded-xl border border-[#15293e] bg-[#071322] p-3.5 text-[#cbd5e1] shadow-xl lg:w-[320px] xl:w-[350px]">
+        <aside className="flex w-full shrink-0 flex-col gap-3 overflow-y-auto rounded-xl border border-[#15293e] bg-[#071322] p-3 text-[#cbd5e1] shadow-xl lg:w-[320px] xl:w-[350px]">
+            {/* Top Action Header: Identify Suspects trigger and status */}
+            <div className="flex items-center justify-between rounded-xl border border-[#1b344b] bg-[#030d17] p-2.5">
+                <div>
+                    <div className="flex items-center gap-1.5">
+                        <span
+                            className={`h-1.5 w-1.5 rounded-full ${
+                                identifyLoading
+                                    ? "bg-[#00d4ff] animate-ping"
+                                    : identified
+                                    ? "bg-[#10b981]"
+                                    : "bg-[#64748b]"
+                            }`}
+                        />
+                        <p className="text-[10px] font-bold uppercase tracking-wider text-[#7ab8d0]">
+                            Attribution Engine
+                        </p>
+                    </div>
+                    <p className="mt-0.5 text-[8.5px] text-[#62859e]">
+                        {identifyLoading
+                            ? "Analyzing candidate trajectories…"
+                            : identified
+                            ? "Custodes evaluation resolved"
+                            : "Standby · Ready to analyze"}
+                    </p>
+                </div>
+                <button
+                    type="button"
+                    onClick={onIdentifySuspects}
+                    disabled={identifyLoading}
+                    className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-[9.5px] font-bold uppercase tracking-wider transition ${
+                        identifyLoading
+                            ? "border-[#1b344b] bg-[#0b2238] text-[#62859e] cursor-wait"
+                            : identified
+                            ? "border-[#0070f3]/60 bg-[#0070f3]/15 text-[#38bdf8] hover:bg-[#0070f3] hover:text-white"
+                            : "border-[#0070f3] bg-[#0070f3] text-white hover:bg-[#0060df] shadow-[0_0_12px_rgba(0,112,243,0.4)]"
+                    }`}
+                >
+                    <span className={identifyLoading ? "animate-spin" : ""}>⟳</span>
+                    <span>
+                        {identifyLoading
+                            ? "IDENTIFYING…"
+                            : identified
+                            ? "RE-RUN IDENTIFICATION"
+                            : "IDENTIFY SUSPECTS"}
+                    </span>
+                </button>
+            </div>
+
+            {identifyError && (
+                <div className="rounded-lg border border-[#ef4444]/40 bg-[#ef4444]/10 p-2.5 text-[9.5px] text-[#ef4444]">
+                    Attribution request failed. Check network connection or pipeline status.
+                </div>
+            )}
+
             {/* View Switcher Breadcrumb if non-home tab is active */}
             {!isIntelligenceHome && (
                 <div className="flex items-center justify-between rounded-lg border border-[#1b344b] bg-[#030d17] p-2 text-[10px]">
@@ -154,21 +165,21 @@ export function InvestigationPanel({
                         onClick={() => onTabChange("Overview")}
                         className="rounded border border-[#1b344b] bg-[#061422] px-2 py-0.5 text-[8.5px] font-semibold text-[#7ab8d0] hover:text-[#f8fafc]"
                     >
-                        ← Back to CAW Results
+                        ← Back to Overview
                     </button>
                 </div>
             )}
 
             {/* Render Tab-Specific Details if not Overview or Suspects */}
             {activeTab === "Hindcast" && (
-                <div className="space-y-3 rounded-xl border border-[#15293e] bg-[#030d17] p-3.5">
+                <div className="space-y-3 rounded-xl border border-[#15293e] bg-[#030d17] p-3">
                     <div className="flex items-center justify-between border-b border-[#1b344b] pb-2">
                         <p className="text-[10px] font-bold uppercase tracking-wider text-[#38bdf8]">
                             Backward Drift Hindcast
                         </p>
                         <span className="font-mono text-[8px] text-[#7dd3fc]">LEEMAR-150</span>
                     </div>
-                    <p className="text-[9.5px] text-[#8aaec4]">
+                    <p className="text-[9px] text-[#8aaec4]">
                         Hydrodynamic reverse drift simulation correlating SAR slick geometry against ECMWF ocean currents.
                     </p>
                     <div className="space-y-2 text-[10px]">
@@ -184,25 +195,31 @@ export function InvestigationPanel({
                         </div>
                         <div className="flex justify-between border-b border-[#1b344b]/60 pb-1">
                             <span className="text-[#62859e]">Correlated vessel</span>
-                            <span className="font-mono font-bold text-[#f59e0b]">{analysis ? String(analysis.backward_hindcast.vessel_mmsi) : "200000000"}</span>
+                            <span className="font-mono font-bold text-[#f59e0b]">
+                                {identified && custodes?.top_vessel ? `MMSI ${custodes.top_vessel}` : "Pending identification"}
+                            </span>
                         </div>
                         <div className="flex justify-between">
-                            <span className="text-[#62859e]">Combined score</span>
-                            <span className="font-mono font-bold text-[#00d4ff]">{analysis ? analysis.backward_hindcast.score.toFixed(3) : "0.908"}</span>
+                            <span className="text-[#62859e]">Attribution score</span>
+                            <span className="font-mono font-bold text-[#00d4ff]">
+                                {identified && custodes?.top_vessel_score !== null && custodes?.top_vessel_score !== undefined
+                                    ? `${(custodes.top_vessel_score * 100).toFixed(1)}%`
+                                    : "—"}
+                            </span>
                         </div>
                     </div>
                 </div>
             )}
 
             {activeTab === "Forecast" && (
-                <div className="space-y-3 rounded-xl border border-[#15293e] bg-[#030d17] p-3.5">
+                <div className="space-y-3 rounded-xl border border-[#15293e] bg-[#030d17] p-3">
                     <div className="flex items-center justify-between border-b border-[#1b344b] pb-2">
                         <p className="text-[10px] font-bold uppercase tracking-wider text-[#22d4ee]">
                             Forward Drift Forecast (24H)
                         </p>
                         <span className="font-mono text-[8px] text-[#67e8f9]">CONVEX HULL</span>
                     </div>
-                    <p className="text-[9.5px] text-[#8aaec4]">
+                    <p className="text-[9px] text-[#8aaec4]">
                         24-hour ensemble trajectory forecast with hydrodynamic uncertainty envelope calculated from dispersion model.
                     </p>
                     <div className="space-y-2 text-[10px]">
@@ -225,21 +242,21 @@ export function InvestigationPanel({
             )}
 
             {activeTab === "AIS Analysis" && (
-                <div className="space-y-3 rounded-xl border border-[#15293e] bg-[#030d17] p-3.5">
+                <div className="space-y-3 rounded-xl border border-[#15293e] bg-[#030d17] p-3">
                     <div className="flex items-center justify-between border-b border-[#1b344b] pb-2">
                         <p className="text-[10px] font-bold uppercase tracking-wider text-[#7ab8d0]">
                             Corridor Fleet Traffic
                         </p>
                         <span className="font-mono text-[8px] text-[#00d4ff]">ARABIAN SEA</span>
                     </div>
-                    <p className="text-[9.5px] text-[#8aaec4]">
-                        Correlating AIS transponder pings across incident temporal bounds (T₀ − 72h to T_detection).
+                    <p className="text-[9px] text-[#8aaec4]">
+                        Correlating AIS candidate tracks across incident temporal bounds (t₀ − 72h to detection).
                     </p>
                 </div>
             )}
 
             {activeTab === "Timeline" && (
-                <div className="rounded-xl border border-[#15293e] bg-[#030d17] p-3.5">
+                <div className="rounded-xl border border-[#15293e] bg-[#030d17] p-3">
                     <p className="mb-2 text-[10px] font-bold uppercase tracking-wider text-[#7ab8d0]">
                         Operational Chronology
                     </p>
@@ -248,7 +265,7 @@ export function InvestigationPanel({
             )}
 
             {activeTab === "Images" && (
-                <div className="space-y-3 rounded-xl border border-[#15293e] bg-[#030d17] p-3.5">
+                <div className="space-y-3 rounded-xl border border-[#15293e] bg-[#030d17] p-3">
                     <div className="flex items-center justify-between border-b border-[#1b344b] pb-2">
                         <p className="text-[10px] font-bold uppercase tracking-wider text-[#7ab8d0]">
                             Sentinel-1 SAR Imagery
@@ -264,7 +281,7 @@ export function InvestigationPanel({
             )}
 
             {activeTab === "Report" && (
-                <div className="space-y-3 rounded-xl border border-[#15293e] bg-[#030d17] p-3.5">
+                <div className="space-y-3 rounded-xl border border-[#15293e] bg-[#030d17] p-3">
                     <div className="flex items-center justify-between border-b border-[#1b344b] pb-2">
                         <p className="text-[10px] font-bold uppercase tracking-wider text-[#7ab8d0]">
                             Maritime Dossier
@@ -273,88 +290,146 @@ export function InvestigationPanel({
                             OFFICIAL
                         </span>
                     </div>
-                    <p className="text-[9.5px] text-[#8aaec4]">
+                    <p className="text-[9px] text-[#8aaec4]">
                         Multi-modal dossier compiled from Copernicus SAR imagery, backward hindcast, and Cross-Attention AIS attribution.
                     </p>
                 </div>
             )}
 
-            {/* MAIN REFERENCE CARDS: Always visible on Overview/Suspects, or underneath tab view */}
-            {/* 1. CAW RESULTS CARD */}
-            <CustodesCard custodes={effectiveCustodes} />
+            {/* 1. CUSTODES DECISION & METRICS CARD */}
+            <CustodesCard
+                custodes={custodes}
+                identified={identified}
+                loading={identifyLoading}
+            />
 
-            {/* 2. ALPHA SURFACE CARD */}
+            {/* 2. ALPHA SURFACE HEATMAP CARD */}
             <AlphaSurfaceHeatmap
-                alphaSurface={effectiveAlphaSurface}
-                winningVesselId={winningVesselId ?? 200000000}
+                alphaSurface={alphaSurface}
+                winningVesselId={winningVesselId}
+                identified={identified}
+                loading={identifyLoading}
                 onVesselClick={onSuspectSelect}
             />
 
-            {/* 3. VESSEL CONFIDENCE SCORES CARD */}
+            {/* 3. TOP 5 CANDIDATES (Bound to actual overall_score sorted descending) */}
             <div className="rounded-xl border border-[#15293e] bg-[#071322] p-3.5 text-[#cbd5e1] shadow-lg">
                 <div className="flex items-center justify-between border-b border-[#1b344b] pb-2.5">
-                    <p className="text-[11px] font-bold uppercase tracking-[.18em] text-[#7ab8d0]">
-                        Vessel Confidence Scores
-                    </p>
-                    <span className="font-mono text-[8.5px] text-[#62859e]">
-                        {candidateList.length} CANDIDATES
+                    <div>
+                        <p className="text-[11px] font-bold uppercase tracking-[.18em] text-[#7ab8d0]">
+                            Top 5 Candidates
+                        </p>
+                        <p className="text-[8px] text-[#62859e]">Ranked by overall attribution score</p>
+                    </div>
+                    <span className="font-mono text-[8px] text-[#62859e]">
+                        {identified ? "overall_score" : "STANDBY"}
                     </span>
                 </div>
 
-                <div className="mt-3 space-y-2">
-                    {candidateList.map((c) => {
-                        const isSelected = c.id === selectedSuspectId || (selectedSuspectId === null && c.id === 200000000);
-                        const isTop = c.score > 0.5;
-                        return (
-                            <div
-                                key={c.id}
-                                onClick={() => onSuspectSelect(c.id)}
-                                className={`flex cursor-pointer items-center justify-between gap-3 rounded-lg border p-2.5 transition-all ${
-                                    isSelected
-                                        ? "border-[#f59e0b]/60 bg-[#0c2438] shadow-[0_0_8px_rgba(245,158,11,0.15)]"
-                                        : "border-[#1b344b] bg-[#030d17] hover:border-[#f59e0b]/40 hover:bg-[#0a1828]"
-                                }`}
-                            >
-                                <span className={`font-mono text-xs font-bold ${isTop ? "text-[#f59e0b]" : "text-[#f8fafc]"}`}>
-                                    {c.mmsi}
-                                </span>
+                <div className="mt-2.5 space-y-1.5">
+                    {identified && sortedSuspects.length > 0 ? (
+                        sortedSuspects.map((candidate, idx) => {
+                            const isSelected = candidate.vessel_id === selectedSuspectId;
+                            const isTop = idx === 0 && candidate.overall_score > 0.1;
+                            const scoreFormatted = candidate.overall_score.toFixed(3);
+                            const barWidth = Math.min(100, Math.max(4, (candidate.overall_score / maxScore) * 100));
 
-                                <div className="flex flex-1 items-center gap-2 max-w-[150px]">
-                                    <div className="h-1.5 flex-1 rounded-full bg-[#0b1c2b] overflow-hidden">
-                                        <div
-                                            className={`h-full rounded-full transition-all ${
-                                                isTop ? "bg-[#f59e0b]" : "bg-[#475569]"
+                            return (
+                                <div
+                                    key={candidate.vessel_id}
+                                    onClick={() => onSuspectSelect(candidate.vessel_id)}
+                                    className={`flex items-center justify-between gap-2.5 rounded-lg border px-2.5 py-1.5 cursor-pointer transition ${
+                                        isSelected
+                                            ? "border-[#f59e0b]/70 bg-[#0c2438] shadow-[0_0_8px_rgba(245,158,11,0.15)]"
+                                            : "border-[#1b344b] bg-[#030d17] hover:border-[#f59e0b]/40 hover:bg-[#0a1828]"
+                                    }`}
+                                >
+                                    <div className="flex items-center gap-2 min-w-[130px]">
+                                        <span className="font-mono text-[10px] font-bold text-[#62859e]">
+                                            #{idx + 1}
+                                        </span>
+                                        <span
+                                            className={`font-mono text-xs font-bold ${
+                                                isTop ? "text-[#f59e0b]" : "text-[#f8fafc]"
                                             }`}
-                                            style={{ width: `${Math.min(100, Math.max(5, c.score * 100))}%` }}
-                                        />
+                                        >
+                                            MMSI {candidate.vessel_id}
+                                        </span>
                                     </div>
-                                    <span
-                                        className={`font-mono text-[10px] font-bold min-w-[38px] text-right ${
-                                            isTop ? "text-[#f59e0b]" : "text-[#94a3b8]"
-                                        }`}
-                                    >
-                                        {(c.score * 100).toFixed(1)}%
-                                    </span>
+
+                                    <div className="flex flex-1 items-center gap-2 max-w-[120px]">
+                                        <div className="h-1.5 flex-1 rounded-full bg-[#0b1c2b] overflow-hidden">
+                                            <div
+                                                className={`h-full rounded-full transition-all ${
+                                                    isTop ? "bg-[#f59e0b]" : "bg-[#475569]"
+                                                }`}
+                                                style={{ width: `${barWidth}%` }}
+                                            />
+                                        </div>
+                                        <span
+                                            className={`font-mono text-[10px] font-bold min-w-[34px] text-right ${
+                                                isTop ? "text-[#f59e0b]" : "text-[#94a3b8]"
+                                            }`}
+                                        >
+                                            {scoreFormatted}
+                                        </span>
+                                    </div>
                                 </div>
+                            );
+                        })
+                    ) : identifyLoading ? (
+                        // Loading skeleton rows
+                        [1, 2, 3, 4, 5].map((num) => (
+                            <div
+                                key={num}
+                                className="flex items-center justify-between gap-2.5 rounded-lg border border-[#1b344b] bg-[#030d17] px-2.5 py-1.5 opacity-60"
+                            >
+                                <div className="flex items-center gap-2">
+                                    <span className="font-mono text-[10px] text-[#62859e]">#{num}</span>
+                                    <span className="font-mono text-[10px] text-[#64748b]">Evaluating…</span>
+                                </div>
+                                <span className="font-mono text-[10px] text-[#62859e]">…</span>
                             </div>
-                        );
-                    })}
+                        ))
+                    ) : (
+                        // Standby empty rows (no fake values before identification)
+                        [1, 2, 3, 4, 5].map((num) => (
+                            <div
+                                key={num}
+                                className="flex items-center justify-between gap-2.5 rounded-lg border border-[#1b344b]/60 bg-[#030d17]/50 px-2.5 py-1.5"
+                            >
+                                <div className="flex items-center gap-2">
+                                    <span className="font-mono text-[10px] text-[#62859e]">#{num}</span>
+                                    <span className="font-mono text-[10px] text-[#64748b]">—</span>
+                                </div>
+                                <span className="font-mono text-[10px] text-[#62859e]">—</span>
+                            </div>
+                        ))
+                    )}
                 </div>
             </div>
 
-            {/* 4. PROVENANCE CARD */}
+            {/* 4. PROVENANCE & METHODOLOGY CARD */}
             <div className="rounded-xl border border-[#15293e] bg-[#071322] p-3 text-[#cbd5e1] shadow-lg">
                 <div className="flex items-center justify-between border-b border-[#1b344b] pb-2">
                     <p className="text-[10px] font-bold uppercase tracking-[.18em] text-[#7ab8d0]">
-                        Provenance
+                        Provenance & Methodology
                     </p>
-                    <span className="rounded border border-[#1b344b] bg-[#020912] px-1.5 py-0.5 font-mono text-[8px] text-[#5a7d96]">
+                    <span className="rounded border border-[#1b344b] bg-[#020912] px-1.5 py-0.5 font-mono text-[7.5px] text-[#5a7d96]">
                         SYNTHETIC AIS
                     </span>
                 </div>
-                <p className="mt-2 text-[9px] leading-relaxed text-[#62859e]">
-                    Synthetic AIS Data · CAW-v1.2 Checkpoint · ECMWF 0.25° Leeway Hydrodynamics
-                </p>
+                <div className="mt-2 space-y-1.5 text-[8.5px] leading-relaxed text-[#62859e]">
+                    <p>
+                        • AIS candidate tracks are synthetic demo data generated for pipeline validation.
+                    </p>
+                    <p>
+                        • CAW/Custodes uses the validated attention checkpoint ({CUSTODES_CHECKPOINT_PRECISION}).
+                    </p>
+                    <p>
+                        • Attribution scores represent ranked candidate probabilities, not a declaration of legal culpability.
+                    </p>
+                </div>
             </div>
         </aside>
     );
