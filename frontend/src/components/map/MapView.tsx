@@ -76,6 +76,8 @@ const STATIC_LAYERS: Array<{ id: string; spec: maplibregl.LayerSpecification }> 
     { id: "hindcast-origin-ring", spec: { id: "hindcast-origin-ring", type: "circle", source: "hindcast-origin-marker", paint: { "circle-color": "#4a8ec4", "circle-radius": 12, "circle-stroke-color": "#4a8ec4", "circle-stroke-width": 1, "circle-opacity": 0.18, "circle-blur": 0 } } },
     { id: "hindcast-origin-marker", spec: { id: "hindcast-origin-marker", type: "circle", source: "hindcast-origin-marker", paint: { "circle-color": "#4a8ec4", "circle-radius": 6, "circle-stroke-color": "#a8d4f0", "circle-stroke-width": 1.5, "circle-opacity": 0.95 } } },
     { id: "hindcast-origin-label", spec: { id: "hindcast-origin-label", type: "symbol", source: "hindcast-origin-label", layout: { "text-field": ["get", "label"], "text-size": 9, "text-anchor": "left", "text-offset": [1.0, 0], "text-allow-overlap": true, "text-letter-spacing": 0.05 }, paint: { "text-color": "#a8d4f0", "text-halo-color": "#0a1828", "text-halo-width": 2 } } },
+    { id: "forecast-envelope-fill", spec: { id: "forecast-envelope-fill", type: "fill", source: "forecast-envelope", paint: { "fill-color": "#22d4ee", "fill-opacity": 0.12 } } },
+    { id: "forecast-envelope-outline", spec: { id: "forecast-envelope-outline", type: "line", source: "forecast-envelope", paint: { "line-color": "#22d4ee", "line-width": 1, "line-opacity": 0.5, "line-dasharray": [2, 2] } } },
     { id: "forecast-centroid-ring", spec: { id: "forecast-centroid-ring", type: "circle", source: "forecast-centroid", paint: { "circle-color": "#22d4ee", "circle-radius": 12, "circle-stroke-color": "#22d4ee", "circle-stroke-width": 1, "circle-opacity": 0.18, "circle-blur": 0 } } },
     { id: "forecast-centroid", spec: { id: "forecast-centroid", type: "circle", source: "forecast-centroid", paint: { "circle-color": "#22d4ee", "circle-radius": 6, "circle-stroke-color": "#a0ecf4", "circle-stroke-width": 1.5, "circle-opacity": 0.9 } } },
     { id: "forecast-centroid-label", spec: { id: "forecast-centroid-label", type: "symbol", source: "forecast-centroid-label", layout: { "text-field": ["get", "label"], "text-size": 9, "text-anchor": "left", "text-offset": [1.0, 0], "text-allow-overlap": true, "text-letter-spacing": 0.05 }, paint: { "text-color": "#a0ecf4", "text-halo-color": "#0a1828", "text-halo-width": 2 } } },
@@ -87,7 +89,7 @@ const ALL_LAYER_IDS = STATIC_LAYERS.map((l) => l.id);
 const ALL_SOURCE_IDS = [
     "region", "spill-polygon", "spill-centroid", "spill-label",
     "hindcast-origin-marker", "hindcast-origin-label", "hindcast-origin-reference",
-    "forecast-centroid", "forecast-centroid-label",
+    "forecast-centroid", "forecast-centroid-label", "forecast-envelope",
     "ais-vessel-tracks", "ais-vessel-markers",
 ];
 
@@ -281,8 +283,10 @@ export function MapView({
             setSource("hindcast-origin-marker", hindcastOriginData);
             setSource("hindcast-origin-label", hindcastOriginLabelData);
             setSource("hindcast-origin-reference", hindcastReferenceData);
+            const forecastEnvelopeData: FeatureCollection = analysis?.uncertainty_envelope ?? emptyCollection;
             setSource("forecast-centroid", forecastCentroidData);
             setSource("forecast-centroid-label", forecastCentroidLabelData);
+            setSource("forecast-envelope", forecastEnvelopeData);
             setSource("ais-vessel-tracks", aisTrackData);
             setSource("ais-vessel-markers", aisMarkerData);
 
@@ -313,7 +317,7 @@ export function MapView({
             });
 
             const forecastVisible = investigationTab === "Forecast" && !!analysis;
-            ["forecast-centroid", "forecast-centroid-ring", "forecast-centroid-label"].forEach((layerId) => {
+            ["forecast-centroid", "forecast-centroid-ring", "forecast-centroid-label", "forecast-envelope-fill", "forecast-envelope-outline"].forEach((layerId) => {
                 if (map.getLayer(layerId)) map.setLayoutProperty(layerId, "visibility", forecastVisible ? "visible" : "none");
             });
 

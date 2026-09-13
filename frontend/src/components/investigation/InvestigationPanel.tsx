@@ -68,7 +68,6 @@ export function InvestigationPanel({ activeTab, onTabChange, suspects, suspectsL
         ["Lookalike", analysis ? (analysis.detection.is_lookalike ? "Yes" : "No") : "Unavailable"],
         ["Texture signature", analysis ? `${analysis.detection.observed_texture_signature_db.toFixed(2)} dB` : "Unavailable"],
     ];
-    const tabs = ["Overview", "Hindcast", "Forecast", "AIS Analysis", "Suspects", "Timeline", "Images", "Report"];
     const selectedSuspect = suspects.find((candidate) => candidate.vessel_id === selectedSuspectId);
 
     return <section className="w-full shrink-0 border-t border-line bg-panel/90 p-5 panel-shadow lg:border-l lg:border-t-0 lg:p-6">
@@ -105,6 +104,5 @@ export function InvestigationPanel({ activeTab, onTabChange, suspects, suspectsL
                     {identified && custodes && alphaSurface && <div className="mt-4 space-y-3"><CustodesCard custodes={custodes} /><AlphaSurfaceHeatmap alphaSurface={alphaSurface} winningVesselId={winningVesselId} onVesselClick={onSuspectSelect} /><p className="border-t border-line/60 pt-2 text-[9px] italic leading-4 text-mist">AIS candidates are synthetic demo data; CAW/Custodes uses the validated attention checkpoint.</p></div>}
                </div>
                 : <><div className="mt-5 space-y-3">{rows.map(([label, value]) => <div className="flex items-center justify-between border-b border-line/70 pb-3" key={label}><span className="text-[10px] text-mist">{label}</span><span className="text-right font-mono text-[10px] text-ink">{value}</span></div>)}</div></>}
-            <div className="mt-5"><p className="eyebrow">Investigation tabs</p><div className="mt-3 grid grid-cols-2 gap-1 text-[10px]">{tabs.map((tab) => <button className={`border px-2 py-2 text-left ${activeTab === tab ? "border-signal bg-panelAlt/80 font-semibold text-signal" : "border-line text-mist hover:text-signal"}`} key={tab} onClick={() => onTabChange(tab)} type="button">{tab}</button>)}</div></div>
         </section>;
 }

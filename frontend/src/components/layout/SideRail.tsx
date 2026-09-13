@@ -9,13 +9,18 @@ const navItems = [
     { id: "Report", label: "Report", icon: "◧", active: false },
 ];
 
+const investigationTabs = ["Overview", "Hindcast", "Forecast", "AIS Analysis", "Suspects", "Timeline", "Images", "Report"];
+
 interface SideRailProps {
     activeSection: string;
     onNavigate: (section: string) => void;
+    investigationTab?: string;
+    onTabChange?: (tab: string) => void;
 }
 
-export function SideRail({ activeSection, onNavigate }: SideRailProps) {
+export function SideRail({ activeSection, onNavigate, investigationTab, onTabChange }: SideRailProps) {
     const activeNav = navItems.find((item) => item.id === activeSection) ?? navItems[0];
+    const showInvestigation = investigationTab !== undefined && onTabChange !== undefined;
     return (
         <aside className="flex w-[72px] shrink-0 flex-col border-r border-line bg-panel/90 py-4 max-lg:w-16 max-lg:justify-center max-lg:px-2">
             <div className="mb-6 flex h-9 w-9 items-center justify-center rounded-sm bg-signal font-bold text-white shadow-glow">
@@ -44,6 +49,31 @@ export function SideRail({ activeSection, onNavigate }: SideRailProps) {
                     );
                 })}
             </nav>
+            {showInvestigation && (
+                <div className="mt-5 border-t border-line pt-4">
+                    <p className="mb-2 px-1 text-[8px] font-semibold uppercase tracking-[.15em] text-mist/70">Investigation</p>
+                    <div className="flex flex-col gap-0.5">
+                        {investigationTabs.map((tab) => {
+                            const isActive = investigationTab === tab;
+                            return (
+                                <button
+                                    className={`flex h-8 w-10 shrink-0 items-center justify-center rounded-sm text-[8px] font-semibold transition-colors ${
+                                        isActive
+                                            ? "bg-signal/20 text-signal"
+                                            : "text-mist hover:bg-panelAlt hover:text-ink"
+                                    }`}
+                                    key={tab}
+                                    onClick={() => onTabChange!(tab)}
+                                    title={tab}
+                                    type="button"
+                                >
+                                    {tab.slice(0, 4)}
+                                </button>
+                            );
+                        })}
+                    </div>
+                </div>
+            )}
             <div className="mt-auto flex items-center gap-2 border-t border-line pt-3 px-1">
                 <span className="h-2 w-2 rounded-full bg-success" />
                 <span className="text-[8px] uppercase tracking-[.15em] text-mist">Online</span>
