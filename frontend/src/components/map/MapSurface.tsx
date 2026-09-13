@@ -47,22 +47,27 @@ export function MapSurface({
                 identified={identified}
                 onVesselSelect={onVesselSelect}
             />
-            {/* Layer switcher — top-right, interactive */}
-            <div className="absolute right-3 top-3 z-20 flex rounded-sm border border-[#1e3a52] bg-[#020b14]/95 p-0.5 shadow-[0_2px_12px_rgba(0,0,0,0.5)]">
-                {layers.map((layer) => (
-                    <button
-                        className={`px-2.5 py-1.5 text-[9px] font-semibold uppercase tracking-[.1em] transition-colors ${
-                            activeLayer === layer
-                                ? "bg-[#0d2235] text-[#00d4ff]"
-                                : "text-[#5a7d96] hover:bg-[#0a1c2c] hover:text-[#7ab8d0]"
-                        }`}
-                        key={layer}
-                        onClick={() => onLayerChange(layer)}
-                        type="button"
-                    >
-                        {layer}
-                    </button>
-                ))}
+            {/* Tactical Layer Switcher — Top-Right */}
+            <div className="absolute right-3 top-3 z-20 flex items-center rounded border border-[#1b344b] bg-[#030d17]/90 p-1 shadow-lg backdrop-blur-sm">
+                {layers.map((layer) => {
+                    const isActive = activeLayer === layer;
+                    const icon = layer === "Satellite" ? "🛰" : layer === "Bathymetry" ? "🌊" : "🗺";
+                    return (
+                        <button
+                            key={layer}
+                            onClick={() => onLayerChange(layer)}
+                            type="button"
+                            className={`flex items-center gap-1.5 rounded px-2.5 py-1 text-[9px] font-semibold uppercase tracking-[.1em] transition ${
+                                isActive
+                                    ? "border border-[#00d4ff]/40 bg-[#0c2438] text-[#00d4ff] shadow-[0_0_8px_rgba(0,212,255,0.12)]"
+                                    : "border border-transparent text-[#62859e] hover:bg-[#071726] hover:text-[#cbd5e1]"
+                            }`}
+                        >
+                            <span className="text-[10px]">{icon}</span>
+                            <span>{layer}</span>
+                        </button>
+                    );
+                })}
             </div>
         </section>
     );

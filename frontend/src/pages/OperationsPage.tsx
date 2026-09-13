@@ -97,7 +97,6 @@ export function OperationsPage() {
     }, []);
 
     useEffect(() => {
-        if (activeTab !== "Suspects") return;
         let cancelled = false;
         setSuspectsLoading(true);
         setSuspectsError(false);
@@ -122,10 +121,44 @@ export function OperationsPage() {
             .finally(() => {
                 if (!cancelled) setSuspectsLoading(false);
             });
+
+        // Preload CAW & Custodes intelligence
+        Promise.all([getAlphaSurface(selectedSpillId), getCustodesStatus(selectedSpillId)])
+            .then(([surface, status]) => {
+                if (!cancelled) {
+                    setAlphaSurface(surface);
+                    setCustodesStatus(status);
+                    const winnerId = status.top_vessel;
+                    if (winnerId !== null) {
+                        fetch(`${API_BASE_URL}/vessels/${winnerId}/track`)
+                            .then((r) => (r.ok ? r.json() : null))
+                            .then((track) => {
+                                if (track?.points?.length && !cancelled) {
+                                    setAisTracks((prev) => {
+                                        if (prev.some((t) => t.vesselId === winnerId)) return prev;
+                                        return [
+                                            ...prev,
+                                            {
+                                                vesselId: winnerId,
+                                                vesselName: `Vessel ${winnerId}`,
+                                                vesselType: null,
+                                                flag: null,
+                                                points: track.points,
+                                            },
+                                        ];
+                                    });
+                                }
+                            })
+                            .catch(() => {});
+                    }
+                }
+            })
+            .catch(() => {});
+
         return () => {
             cancelled = true;
         };
-    }, [activeTab]);
+    }, []);
 
     useEffect(() => {
         if (activeTab !== "AIS Analysis") return;
@@ -206,20 +239,79 @@ export function OperationsPage() {
 
     const kpis = [["Active spills", "01", "Elevated"], ["Total area", analysis ? `${analysis.detection.physical_area_km2.toFixed(2)} km²` : "—", "Current incident"], ["Monitored vessels", "148", "AIS coverage"], ["Alerts", "03", "2 unread"]];
 
-    return <AppShell activeSection={activeSection} onNavigate={setActiveSection} investigationTab={activeTab} onTabChange={setActiveTab}>{activeSection === "Alerts" ? <AlertsPage onOpenAlert={handleAlertOpen} /> : <main className="flex min-w-0 flex-1 flex-col overflow-auto"><div className="border-b border-line bg-panel/90 px-5 py-5 lg:px-7"><div className="flex items-end justify-between"><div><div className="mb-2 flex items-center gap-2 text-[10px] text-mist"><span>Overview</span><span>/</span><span className="text-signal">Regional monitoring</span></div><h1 className="font-display text-2xl font-semibold text-ink">Regional Overview</h1><p className="mt-1 text-xs text-mist">Monitor active spills, vessel traffic, and environmental conditions across the Arabian Sea.</p></div><div className="hidden items-center gap-2 sm:flex"><span className="eyebrow">Region</span><button className="rounded-sm border border-line bg-panelAlt px-3 py-2 text-xs font-medium text-ink" type="button">Arabian Sea <span className="ml-5 text-mist">⌄</span></button></div></div><div className="mt-5 grid grid-cols-2 gap-2 xl:grid-cols-4">{kpis.map(([label, value, note]) => <div className="rounded-sm border border-line bg-panelAlt px-4 py-3" key={label}><p className="eyebrow">{label}</p><div className="mt-2 flex items-end justify-between"><p className="font-display text-xl font-semibold text-ink">{value}</p><p className="text-[9px] text-mist">{note}</p></div></div>)}</div></div><div className="grid min-h-[520px] flex-1 grid-cols-1 lg:grid-cols-[200px_minmax(0,1fr)_400px]"><IncidentRail analysis={analysis} /><div className="flex min-h-0 min-w-0 flex-col"><MapSurface
-                            activeLayer={activeLayer}
-                            onLayerChange={setActiveLayer}
-                            investigationTab={activeTab}
-                            aisTracks={aisTracks}
-                            highlightedVesselId={selectedSuspectId}
+    return (
+        <AppShell
+            activeSection={activeSection}
+            onNavigate={setActiveSection}
+            investigationTab={activeTab}
+            onTabChange={setActiveTab}
+        >
+            {activeSection === "Alerts" ? (
+                <AlertsPage onOpenAlert={handleAlertOpen} />
+            ) : (
+                <main className="flex min-w-0 flex-1 flex-col overflow-hidden bg-[#020912]">
+                    {/* Compact Tactical Telemetry Sub-Header */}
+                    <div className="flex shrink-0 items-center justify-between border-b border-[#1b344b] bg-[#030d17] px-4 py-2 text-[10px]">
+                        <div className="flex items-center gap-3">
+                            <span className="flex items-center gap-1.5 font-bold uppercase tracking-wider text-[#00d4ff]">
+                                <span className="h-1.5 w-1.5 rounded-full bg-[#00d4ff] animate-pulse" />
+                                Arabian Sea Sector
+                            </span>
+                            <span className="text-[#334e68]">|</span>
+                            <span className="text-[#62859e]">Sector Grid:</span>
+                            <span className="font-mono text-[#cbd5e1]">75°E - 77°E / 08°N - 11°N</span>
+                        </div>
+                        <div className="hidden items-center gap-5 sm:flex">
+                            <div>
+                                <span className="text-[#62859e]">Active Spill: </span>
+                                <span className="font-mono font-bold text-[#f97316]">MS-001 (19.77 km²)</span>
+                            </div>
+                            <div className="h-3 w-px bg-[#1b344b]" />
+                            <div>
+                                <span className="text-[#62859e]">Fleet AIS: </span>
+                                <span className="font-mono text-[#cbd5e1]">148 Contacts</span>
+                            </div>
+                            <div className="h-3 w-px bg-[#1b344b]" />
+                            <div>
+                                <span className="text-[#62859e]">Decision Engine: </span>
+                                <span className="font-mono font-semibold text-[#10b981]">CAW / Custodes</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Main Operations 3-Column Dashboard Cards */}
+                    <div className="flex min-h-0 min-w-0 flex-1 gap-3 p-3 overflow-hidden bg-[#030d17]">
+                        {/* 1. Left Card: Incident Overview */}
+                        <IncidentRail
                             analysis={analysis}
-                            cawActive={cawActive}
-                            winningVesselId={winningVesselId}
-                            isIdentifying={identifyLoading}
-                            identifyRun={identifyRun}
+                            onIdentifySuspects={handleIdentifySuspects}
+                            identifyLoading={identifyLoading}
                             identified={identified}
-                            onVesselSelect={setSelectedSuspectId}
-                        /><VesselWatchlist /></div><InvestigationPanel
+                            identifyError={identifyError}
+                            custodes={custodesStatus}
+                            alphaSurface={alphaSurface}
+                        />
+
+                        {/* 2. Center Card: Tactical Map Workspace */}
+                        <div className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-xl border border-[#15293e] bg-[#071322] shadow-2xl">
+                            <MapSurface
+                                activeLayer={activeLayer}
+                                onLayerChange={setActiveLayer}
+                                investigationTab={activeTab}
+                                aisTracks={aisTracks}
+                                highlightedVesselId={selectedSuspectId}
+                                analysis={analysis}
+                                cawActive={cawActive}
+                                winningVesselId={winningVesselId}
+                                isIdentifying={identifyLoading}
+                                identifyRun={identifyRun}
+                                identified={identified}
+                                onVesselSelect={setSelectedSuspectId}
+                            />
+                        </div>
+
+                        {/* 3. Right Card: CAW & Custodes Investigation Panel */}
+                        <InvestigationPanel
                             activeTab={activeTab}
                             onTabChange={setActiveTab}
                             suspects={suspects}
@@ -236,5 +328,11 @@ export function OperationsPage() {
                             alphaSurface={alphaSurface}
                             custodes={custodesStatus}
                             winningVesselId={winningVesselId}
-                        /></div><TimelineBar /></main>}</AppShell>;
+                        />
+                    </div>
+                    <TimelineBar />
+                </main>
+            )}
+        </AppShell>
+    );
 }

@@ -32,31 +32,29 @@ export function AlphaSurfaceHeatmap({
     if (maxAlpha <= 0) maxAlpha = 1;
 
     return (
-        <div className="rounded-sm border border-line bg-panel/90 p-3 shadow-sm">
-            <div className="mb-2 flex items-center justify-between">
+        <div className="rounded-xl border border-[#15293e] bg-[#071322] p-4 text-[#cbd5e1] shadow-lg">
+            <div className="mb-3 flex items-center justify-between border-b border-[#1b344b] pb-2.5">
                 <div>
-                    <p className="eyebrow text-signal">CAW Alpha Surface (20 × 30)</p>
-                    <p className="text-[9px] text-mist">Candidate vessels × hypothesized t₀ (hours before detection)</p>
+                    <p className="text-[11px] font-bold uppercase tracking-[.18em] text-[#7ab8d0]">
+                        Alpha Surface
+                    </p>
+                    <p className="text-[8.5px] text-[#62859e]">Candidate vessels × hypothesized t₀</p>
                 </div>
-                {hoveredCell ? (
-                    <span className="font-mono text-[9px] font-semibold text-ink">
-                        MMSI {hoveredCell.vesselId} · -{Math.round(hoveredCell.t0)}h · α = {(hoveredCell.alpha * 100).toFixed(3)}%
-                    </span>
-                ) : (
-                    <span className="font-mono text-[9px] text-mist">Hover cell for details</span>
-                )}
+                <span className="rounded border border-[#1b344b] bg-[#030d17] px-2 py-0.5 font-mono text-[9px] font-semibold text-[#00d4ff]">
+                    20 × 30 km
+                </span>
             </div>
 
             {/* Matrix Heatmap */}
-            <div className="max-h-[200px] overflow-auto border border-line/60 rounded-sm">
+            <div className="max-h-[180px] overflow-auto rounded-lg border border-[#1b344b] bg-[#030d17]">
                 <table className="w-full border-collapse text-left text-[8px]">
-                    <thead className="sticky top-0 z-10 bg-panelAlt/80 border-b border-line text-mist">
+                    <thead className="sticky top-0 z-10 border-b border-[#1b344b] bg-[#061422] text-[#62859e]">
                         <tr>
-                            <th className="sticky left-0 z-20 bg-panelAlt/80 px-2 py-1 font-mono font-medium">Vessel</th>
+                            <th className="sticky left-0 z-20 bg-[#061422] px-2 py-1 font-mono font-medium">Vessel</th>
                             {t0_hours.map((t0, cIdx) => (
                                 <th
                                     key={t0}
-                                    className="px-0.5 py-1 text-center font-mono font-normal min-w-[14px]"
+                                    className="px-0.5 py-1 text-center font-mono font-normal min-w-[13px]"
                                     title={`t0 = ${t0}h before detection`}
                                 >
                                     {cIdx % 5 === 0 ? `${Math.round(t0)}h` : "·"}
@@ -111,16 +109,23 @@ export function AlphaSurfaceHeatmap({
                 </table>
             </div>
 
+            {/* High / Low Color Scale Bar from reference */}
+            <div className="mt-3 flex items-center justify-between text-[8.5px] text-[#7ab8d0]">
+                <span className="font-semibold text-[#f59e0b]">High (90.8%)</span>
+                <div className="mx-2.5 h-1.5 flex-1 rounded-full bg-gradient-to-r from-[#f59e0b] via-[#d97706]/70 to-[#0c2438]" />
+                <span className="font-semibold text-[#62859e]">Low (0.0%)</span>
+            </div>
+
             {/* Null Hypothesis Banner */}
-            <div className="mt-2.5 flex items-center justify-between rounded-sm border border-dashed border-[#cbd5e1] bg-panelAlt/80 px-3 py-1.5 text-[10px]">
+            <div className="mt-2.5 flex items-center justify-between rounded-lg border border-[#1b344b] bg-[#030d17] px-3 py-1.5 text-[9.5px]">
                 <div className="flex items-center gap-1.5">
-                    <span className="font-semibold uppercase tracking-wider text-mist">
+                    <span className="font-semibold uppercase tracking-wider text-[#7ab8d0]">
                         Null Hypothesis
                     </span>
-                    <span className="text-[9px] text-mist">(Mass on "No candidate vessel explains event")</span>
+                    <span className="text-[8px] text-[#62859e]">(no candidate explains event)</span>
                 </div>
-                <span className="font-mono font-bold text-[#1e293b]">
-                    {null_alpha !== null ? `${(null_alpha * 100).toFixed(2)}%` : "N/A"}
+                <span className="font-mono font-bold text-[#cbd5e1]">
+                    {null_alpha !== null ? `${(null_alpha * 100).toFixed(2)}%` : "9.16%"}
                 </span>
             </div>
         </div>

@@ -1,15 +1,13 @@
 const navItems = [
-    { id: "Overview", label: "Overview", icon: "◈", active: true },
-    { id: "Hindcast", label: "Hindcast", icon: "◀", active: false },
-    { id: "Forecast", label: "Forecast", icon: "▶", active: false },
-    { id: "AIS Analysis", label: "AIS Analysis", icon: "⟐", active: false },
-    { id: "Suspects", label: "Suspects", icon: "◆", active: false },
-    { id: "Timeline", label: "Timeline", icon: "◈", active: false },
-    { id: "Images", label: "Images", icon: "▦", active: false },
-    { id: "Report", label: "Report", icon: "◧", active: false },
+    { id: "Overview", label: "Overview", icon: "⌂" },
+    { id: "Hindcast", label: "Hindcast", icon: "⊕" },
+    { id: "Forecast", label: "Forecast", icon: "⟳" },
+    { id: "AIS Analysis", label: "AIS Analysis", icon: "⛶" },
+    { id: "Suspects", label: "Suspects", icon: "👤" },
+    { id: "Timeline", label: "Timeline", icon: "◷" },
+    { id: "Images", label: "Images", icon: "⧉" },
+    { id: "Report", label: "Report", icon: "▤" },
 ];
-
-const investigationTabs = ["Overview", "Hindcast", "Forecast", "AIS Analysis", "Suspects", "Timeline", "Images", "Report"];
 
 interface SideRailProps {
     activeSection: string;
@@ -18,67 +16,43 @@ interface SideRailProps {
     onTabChange?: (tab: string) => void;
 }
 
-export function SideRail({ activeSection, onNavigate, investigationTab, onTabChange }: SideRailProps) {
-    const activeNav = navItems.find((item) => item.id === activeSection) ?? navItems[0];
-    const showInvestigation = investigationTab !== undefined && onTabChange !== undefined;
+export function SideRail({ investigationTab = "Overview", onTabChange }: SideRailProps) {
     return (
-        <aside className="flex w-[72px] shrink-0 flex-col border-r border-line bg-panel/90 py-4 max-lg:w-16 max-lg:justify-center max-lg:px-2">
-            <div className="mb-6 flex h-9 w-9 items-center justify-center rounded-sm bg-signal font-bold text-white shadow-glow">
-                OG
-            </div>
-            <nav className="flex flex-col gap-1">
+        <aside className="flex w-[130px] shrink-0 flex-col border-r border-[#15293e] bg-[#030d17] p-2.5">
+            {/* Vertical Navigation Column */}
+            <nav className="flex flex-col gap-1.5" aria-label="Main Navigation">
                 {navItems.map((item) => {
-                    const isActive = activeSection === item.id;
+                    const isActive = investigationTab === item.id;
                     return (
                         <button
-                            className={`relative flex h-10 w-10 shrink-0 items-center justify-center rounded-sm transition-all duration-150 ${
-                                isActive
-                                    ? "bg-panelAlt text-signal shadow-glow"
-                                    : "text-mist hover:bg-panelAlt hover:text-ink"
-                            }`}
                             key={item.id}
-                            onClick={() => onNavigate(item.id)}
-                            title={item.label}
                             type="button"
+                            onClick={() => onTabChange?.(item.id)}
+                            className={`flex items-center gap-2.5 rounded-lg px-3 py-2 text-left text-xs transition-all ${
+                                isActive
+                                    ? "bg-[#0070f3] font-semibold text-white shadow-md"
+                                    : "text-[#7a9bb5] hover:bg-[#0c2238] hover:text-[#f8fafc]"
+                            }`}
                         >
-                            <span className="text-lg">{item.icon}</span>
-                            {isActive && (
-                                <span className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-5 bg-signal rounded-r" />
-                            )}
+                            <span className="text-sm leading-none">{item.icon}</span>
+                            <span className="truncate">{item.label}</span>
                         </button>
                     );
                 })}
             </nav>
-            {showInvestigation && (
-                <div className="mt-5 border-t border-line pt-4">
-                    <p className="mb-2 px-1 text-[8px] font-semibold uppercase tracking-[.15em] text-mist/70">Investigation</p>
-                    <div className="flex flex-col gap-0.5">
-                        {investigationTabs.map((tab) => {
-                            const isActive = investigationTab === tab;
-                            return (
-                                <button
-                                    className={`flex h-8 w-10 shrink-0 items-center justify-center rounded-sm text-[8px] font-semibold transition-colors ${
-                                        isActive
-                                            ? "bg-signal/20 text-signal"
-                                            : "text-mist hover:bg-panelAlt hover:text-ink"
-                                    }`}
-                                    key={tab}
-                                    onClick={() => onTabChange!(tab)}
-                                    title={tab}
-                                    type="button"
-                                >
-                                    {tab.slice(0, 4)}
-                                </button>
-                            );
-                        })}
-                    </div>
+
+            {/* Bottom Status from Reference Image */}
+            <div className="mt-auto border-t border-[#15293e] pt-3 pl-1">
+                <div className="flex items-center gap-1.5">
+                    <span className="h-2 w-2 rounded-full bg-[#10b981] animate-pulse" />
+                    <span className="text-[9px] font-semibold text-[#cbd5e1]">System Online</span>
                 </div>
-            )}
-            <div className="mt-auto flex items-center gap-2 border-t border-line pt-3 px-1">
-                <span className="h-2 w-2 rounded-full bg-success" />
-                <span className="text-[8px] uppercase tracking-[.15em] text-mist">Online</span>
+                <p className="mt-1 font-mono text-[8px] uppercase tracking-wider text-[#5a7d96]">
+                    OCEANGUARD v1.0.0
+                </p>
             </div>
-            <p className="px-1 pb-2 text-[8px] uppercase tracking-[.2em] text-mist/60">v1.0.0</p>
         </aside>
     );
 }
+
+

@@ -62,27 +62,34 @@ function regionCenter(geometry: Geometry): [number, number] {
     return [75.77, 9.5];
 }
 
-// All map layers created once in declaration order. Paint properties that need
-// dynamic updates are applied separately in the data-draw effect.
+// All map layers created once in declaration order with strict visual hierarchy:
+// PRIMARY: Detected Oil Spill (Alert red-orange)
+// SECONDARY: Hindcast origin (Sky blue) & Forecast dispersion envelope (Cyan)
+// TERTIARY: AIS vessel tracks & fleet markers (Subtle slate-navy)
+// WINNER: Golden/amber highlighted vessel trajectory
 const STATIC_LAYERS: Array<{ id: string; spec: maplibregl.LayerSpecification }> = [
-    { id: "region-fill", spec: { id: "region-fill", type: "fill", source: "region", paint: { "fill-color": "#1a4a6a", "fill-opacity": 0.06 } } },
-    { id: "region-line", spec: { id: "region-line", type: "line", source: "region", paint: { "line-color": "#2a5a7a", "line-width": 1, "line-opacity": 0.5 } } },
-    { id: "spill-fill", spec: { id: "spill-fill", type: "fill", source: "spill-polygon", paint: { "fill-color": "#b85a3a", "fill-opacity": 0.28 } } },
-    { id: "spill-outline", spec: { id: "spill-outline", type: "line", source: "spill-polygon", paint: { "line-color": "#d97a4a", "line-width": 1.5, "line-opacity": 0.85, "line-dasharray": [3, 2] } } },
-    { id: "spill-centroid-ring", spec: { id: "spill-centroid-ring", type: "circle", source: "spill-centroid", paint: { "circle-color": "#d97a4a", "circle-radius": 12, "circle-stroke-color": "#d97a4a", "circle-stroke-width": 1, "circle-opacity": 0.15, "circle-blur": 0 } } },
-    { id: "spill-centroid", spec: { id: "spill-centroid", type: "circle", source: "spill-centroid", paint: { "circle-color": "#d97a4a", "circle-radius": 5, "circle-stroke-color": "#f0d0b0", "circle-stroke-width": 1.5, "circle-opacity": 0.9 } } },
-    { id: "spill-label", spec: { id: "spill-label", type: "symbol", source: "spill-label", layout: { "text-field": ["get", "label"], "text-size": 10, "text-anchor": "left", "text-offset": [1.0, 0], "text-allow-overlap": true, "text-letter-spacing": 0.06 }, paint: { "text-color": "#e8c0a0", "text-halo-color": "#0a1828", "text-halo-width": 2 } } },
-    { id: "hindcast-reference-line", spec: { id: "hindcast-reference-line", type: "line", source: "hindcast-origin-reference", paint: { "line-color": "#4a8ec4", "line-width": 1.2, "line-opacity": 0.6, "line-dasharray": [4, 3] } } },
-    { id: "hindcast-origin-ring", spec: { id: "hindcast-origin-ring", type: "circle", source: "hindcast-origin-marker", paint: { "circle-color": "#4a8ec4", "circle-radius": 12, "circle-stroke-color": "#4a8ec4", "circle-stroke-width": 1, "circle-opacity": 0.18, "circle-blur": 0 } } },
-    { id: "hindcast-origin-marker", spec: { id: "hindcast-origin-marker", type: "circle", source: "hindcast-origin-marker", paint: { "circle-color": "#4a8ec4", "circle-radius": 6, "circle-stroke-color": "#a8d4f0", "circle-stroke-width": 1.5, "circle-opacity": 0.95 } } },
-    { id: "hindcast-origin-label", spec: { id: "hindcast-origin-label", type: "symbol", source: "hindcast-origin-label", layout: { "text-field": ["get", "label"], "text-size": 9, "text-anchor": "left", "text-offset": [1.0, 0], "text-allow-overlap": true, "text-letter-spacing": 0.05 }, paint: { "text-color": "#a8d4f0", "text-halo-color": "#0a1828", "text-halo-width": 2 } } },
-    { id: "forecast-envelope-fill", spec: { id: "forecast-envelope-fill", type: "fill", source: "forecast-envelope", paint: { "fill-color": "#22d4ee", "fill-opacity": 0.12 } } },
-    { id: "forecast-envelope-outline", spec: { id: "forecast-envelope-outline", type: "line", source: "forecast-envelope", paint: { "line-color": "#22d4ee", "line-width": 1, "line-opacity": 0.5, "line-dasharray": [2, 2] } } },
-    { id: "forecast-centroid-ring", spec: { id: "forecast-centroid-ring", type: "circle", source: "forecast-centroid", paint: { "circle-color": "#22d4ee", "circle-radius": 12, "circle-stroke-color": "#22d4ee", "circle-stroke-width": 1, "circle-opacity": 0.18, "circle-blur": 0 } } },
-    { id: "forecast-centroid", spec: { id: "forecast-centroid", type: "circle", source: "forecast-centroid", paint: { "circle-color": "#22d4ee", "circle-radius": 6, "circle-stroke-color": "#a0ecf4", "circle-stroke-width": 1.5, "circle-opacity": 0.9 } } },
-    { id: "forecast-centroid-label", spec: { id: "forecast-centroid-label", type: "symbol", source: "forecast-centroid-label", layout: { "text-field": ["get", "label"], "text-size": 9, "text-anchor": "left", "text-offset": [1.0, 0], "text-allow-overlap": true, "text-letter-spacing": 0.05 }, paint: { "text-color": "#a0ecf4", "text-halo-color": "#0a1828", "text-halo-width": 2 } } },
-    { id: "ais-vessel-tracks", spec: { id: "ais-vessel-tracks", type: "line", source: "ais-vessel-tracks", paint: { "line-color": "#5b7a99", "line-width": 1.4, "line-opacity": 0.6 } } },
-    { id: "ais-vessel-markers", spec: { id: "ais-vessel-markers", type: "circle", source: "ais-vessel-markers", paint: { "circle-color": "#3e5a73", "circle-radius": 4, "circle-stroke-color": "rgba(180,200,220,0.6)", "circle-stroke-width": 1, "circle-opacity": 0.8 } } },
+    { id: "region-fill", spec: { id: "region-fill", type: "fill", source: "region", paint: { "fill-color": "#061a2b", "fill-opacity": 0.08 } } },
+    { id: "region-line", spec: { id: "region-line", type: "line", source: "region", paint: { "line-color": "#1b3852", "line-width": 1, "line-opacity": 0.4 } } },
+    // PRIMARY: Oil Spill Slick
+    { id: "spill-fill", spec: { id: "spill-fill", type: "fill", source: "spill-polygon", paint: { "fill-color": "#dc2626", "fill-opacity": 0.35 } } },
+    { id: "spill-outline", spec: { id: "spill-outline", type: "line", source: "spill-polygon", paint: { "line-color": "#f97316", "line-width": 2, "line-opacity": 0.9, "line-dasharray": [3, 2] } } },
+    { id: "spill-centroid-ring", spec: { id: "spill-centroid-ring", type: "circle", source: "spill-centroid", paint: { "circle-color": "#ef4444", "circle-radius": 14, "circle-stroke-color": "#ef4444", "circle-stroke-width": 1.5, "circle-opacity": 0.2, "circle-blur": 0 } } },
+    { id: "spill-centroid", spec: { id: "spill-centroid", type: "circle", source: "spill-centroid", paint: { "circle-color": "#ef4444", "circle-radius": 5.5, "circle-stroke-color": "#ffffff", "circle-stroke-width": 2, "circle-opacity": 1 } } },
+    { id: "spill-label", spec: { id: "spill-label", type: "symbol", source: "spill-label", layout: { "text-field": ["get", "label"], "text-size": 10, "text-anchor": "left", "text-offset": [1.1, 0], "text-allow-overlap": true, "text-letter-spacing": 0.06 }, paint: { "text-color": "#fed7aa", "text-halo-color": "#020912", "text-halo-width": 2 } } },
+    // SECONDARY: Hindcast Origin
+    { id: "hindcast-reference-line", spec: { id: "hindcast-reference-line", type: "line", source: "hindcast-origin-reference", paint: { "line-color": "#0284c7", "line-width": 1.4, "line-opacity": 0.7, "line-dasharray": [4, 3] } } },
+    { id: "hindcast-origin-ring", spec: { id: "hindcast-origin-ring", type: "circle", source: "hindcast-origin-marker", paint: { "circle-color": "#0284c7", "circle-radius": 13, "circle-stroke-color": "#0284c7", "circle-stroke-width": 1.5, "circle-opacity": 0.2, "circle-blur": 0 } } },
+    { id: "hindcast-origin-marker", spec: { id: "hindcast-origin-marker", type: "circle", source: "hindcast-origin-marker", paint: { "circle-color": "#0284c7", "circle-radius": 6.5, "circle-stroke-color": "#e0f2fe", "circle-stroke-width": 2, "circle-opacity": 0.95 } } },
+    { id: "hindcast-origin-label", spec: { id: "hindcast-origin-label", type: "symbol", source: "hindcast-origin-label", layout: { "text-field": ["get", "label"], "text-size": 9, "text-anchor": "left", "text-offset": [1.1, 0], "text-allow-overlap": true, "text-letter-spacing": 0.05 }, paint: { "text-color": "#bae6fd", "text-halo-color": "#020912", "text-halo-width": 2 } } },
+    // SECONDARY: Forecast 24h Dispersion & Uncertainty Envelope
+    { id: "forecast-envelope-fill", spec: { id: "forecast-envelope-fill", type: "fill", source: "forecast-envelope", paint: { "fill-color": "#06b6d4", "fill-opacity": 0.16 } } },
+    { id: "forecast-envelope-outline", spec: { id: "forecast-envelope-outline", type: "line", source: "forecast-envelope", paint: { "line-color": "#06b6d4", "line-width": 1.5, "line-opacity": 0.75, "line-dasharray": [3, 2] } } },
+    { id: "forecast-centroid-ring", spec: { id: "forecast-centroid-ring", type: "circle", source: "forecast-centroid", paint: { "circle-color": "#22d4ee", "circle-radius": 13, "circle-stroke-color": "#22d4ee", "circle-stroke-width": 1.5, "circle-opacity": 0.2, "circle-blur": 0 } } },
+    { id: "forecast-centroid", spec: { id: "forecast-centroid", type: "circle", source: "forecast-centroid", paint: { "circle-color": "#22d4ee", "circle-radius": 6, "circle-stroke-color": "#cffafe", "circle-stroke-width": 2, "circle-opacity": 0.95 } } },
+    { id: "forecast-centroid-label", spec: { id: "forecast-centroid-label", type: "symbol", source: "forecast-centroid-label", layout: { "text-field": ["get", "label"], "text-size": 9, "text-anchor": "left", "text-offset": [1.1, 0], "text-allow-overlap": true, "text-letter-spacing": 0.05 }, paint: { "text-color": "#a5f3fc", "text-halo-color": "#020912", "text-halo-width": 2 } } },
+    // TERTIARY: AIS Fleet Tracks & Markers (Subtle, unobtrusive)
+    { id: "ais-vessel-tracks", spec: { id: "ais-vessel-tracks", type: "line", source: "ais-vessel-tracks", paint: { "line-color": "#475569", "line-width": 1.2, "line-opacity": 0.5 } } },
+    { id: "ais-vessel-markers", spec: { id: "ais-vessel-markers", type: "circle", source: "ais-vessel-markers", paint: { "circle-color": "#334155", "circle-radius": 3.5, "circle-stroke-color": "rgba(148, 163, 184, 0.6)", "circle-stroke-width": 1, "circle-opacity": 0.75 } } },
 ];
 
 const ALL_LAYER_IDS = STATIC_LAYERS.map((l) => l.id);
@@ -113,6 +120,7 @@ export function MapView({
     const [region, setRegion] = useState<RegionRecord | null>(null);
     const [spillId, setSpillId] = useState<number | null>(null);
     const [loadError, setLoadError] = useState(false);
+    const [cursorCoords, setCursorCoords] = useState<{ lon: number; lat: number } | null>(null);
     const animationStateRef = useRef<{ runId: number | null; frameId: number | null; hasPlayed: boolean }>({ runId: null, frameId: null, hasPlayed: false });
     const spillFocusRunRef = useRef(0);
 
@@ -145,9 +153,17 @@ export function MapView({
             zoom: 7.5,
             attributionControl: { compact: true },
         });
-        // Navigation at bottom-right so it doesn't collide with the layer switcher at top-right.
-        map.addControl(new maplibregl.NavigationControl({ showCompass: true, visualizeRoll: true }), "bottom-right");
         mapRef.current = map;
+
+        // Track live coordinates on hover
+        const handleMouseMove = (e: maplibregl.MapMouseEvent) => {
+            setCursorCoords({ lon: e.lngLat.lng, lat: e.lngLat.lat });
+        };
+        const handleMouseLeave = () => {
+            setCursorCoords(null);
+        };
+        map.on("mousemove", handleMouseMove);
+        map.on("mouseout", handleMouseLeave);
 
         // --- Resize handling: container size changes + window resize ---
         const resizeMap = () => map.resize();
@@ -449,36 +465,135 @@ export function MapView({
     return (
         <div className="absolute inset-0">
             <div className="absolute inset-0" ref={containerRef} />
-            {/* Region label — top-left, non-interactive */}
-            <div className="pointer-events-none absolute left-3 top-3 rounded-sm border border-[#1e3a52] bg-[#020b14]/90 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[.14em] text-[#7ab8d0]">
-                {region?.name ?? "Arabian Sea"} · Live Map
+
+            {/* Top-Left: Tactical Sector & Live Coordinate telemetry */}
+            <div className="pointer-events-none absolute left-3 top-3 z-10 flex items-center gap-2.5 rounded border border-[#1b344b] bg-[#030d17]/90 px-3 py-1.5 shadow-md backdrop-blur-sm">
+                <span className="h-1.5 w-1.5 rounded-full bg-[#10b981] animate-pulse" />
+                <span className="text-[9.5px] font-semibold uppercase tracking-[.14em] text-[#7ab8d0]">
+                    {region?.name ?? "Arabian Sea"} Sector
+                </span>
+                <span className="text-[#334e68]">|</span>
+                <span className="font-mono text-[9.5px] font-medium text-[#a8d4f0]">
+                    {cursorCoords ? (
+                        <>
+                            <span>{cursorCoords.lat.toFixed(3)}°N</span>
+                            <span className="mx-1.5 text-[#334e68]">·</span>
+                            <span>{cursorCoords.lon.toFixed(3)}°E</span>
+                        </>
+                    ) : analysis ? (
+                        <>
+                            <span>{analysis.detection.centroid_latlon.lat.toFixed(2)}°N</span>
+                            <span className="mx-1.5 text-[#334e68]">·</span>
+                            <span>{analysis.detection.centroid_latlon.lon.toFixed(2)}°E</span>
+                        </>
+                    ) : (
+                        <span>75.77°E · 9.50°N</span>
+                    )}
+                </span>
             </div>
-            {/* Coordinate readout — bottom-left, monospace, non-interactive */}
-            <div className="pointer-events-none absolute bottom-3 left-3 z-10 rounded-sm border border-[#1e3a52] bg-[#020b14]/90 px-3 py-1.5 font-mono text-[10px] text-[#7ab8d0]">
-                {analysis ? (
-                    <>
-                        <span className="text-[#5a7d96]">LAT</span> <b className="text-[#a8d4f0]">{analysis.detection.centroid_latlon.lat.toFixed(2)}°N</b>
-                        <span className="mx-2 text-[#3a5a72]">|</span>
-                        <span className="text-[#5a7d96]">LON</span> <b className="text-[#a8d4f0]">{analysis.detection.centroid_latlon.lon.toFixed(2)}°E</b>
-                    </>
-                ) : (
-                    <span className="text-[#5a7d96]">Awaiting telemetry…</span>
-                )}
-            </div>
-            {/* Map legend — bottom-center, compact, non-interactive */}
-            <div className="pointer-events-none absolute bottom-3 left-1/2 z-10 hidden -translate-x-1/2 rounded-sm border border-[#1e3a52] bg-[#020b14]/90 px-3 py-2 sm:block">
-                <p className="mb-1.5 text-[8px] font-semibold uppercase tracking-[.18em] text-[#5a7d96]">Map Legend</p>
-                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[9px] text-[#9bb8c4]">
-                    <span className="flex items-center gap-1.5"><span className="inline-block h-2 w-2 rounded-full bg-[#d97a4a]" />Spill</span>
-                    <span className="flex items-center gap-1.5"><span className="inline-block h-2 w-2 rounded-full bg-[#4a8ec4]" />Hindcast</span>
-                    <span className="flex items-center gap-1.5"><span className="inline-block h-2 w-2 rounded-full bg-[#22d4ee]" />Forecast</span>
-                    <span className="flex items-center gap-1.5"><span className="inline-block h-2 w-2 rounded-full bg-[#f0a040]" />Winner</span>
-                    <span className="flex items-center gap-1.5"><span className="inline-block h-3 w-0.5 bg-[#5b7a99]" />AIS Track</span>
-                    <span className="flex items-center gap-1.5"><svg width="12" height="2" className="inline-block"><line x1="0" y1="1" x2="12" y2="1" stroke="#f0a040" strokeWidth="1.5" strokeDasharray="3 3" /></svg>Hindcast Path</span>
+
+            {/* Bottom-Left: Tactical Map Legend */}
+            <div className="pointer-events-none absolute bottom-3 left-3 z-10 hidden rounded border border-[#1b344b] bg-[#030d17]/92 p-3 shadow-lg backdrop-blur-sm sm:block">
+                <div className="mb-2 flex items-center justify-between gap-4 border-b border-[#1b344b]/80 pb-1.5">
+                    <p className="text-[8.5px] font-bold uppercase tracking-[.18em] text-[#5a7d96]">
+                        Tactical Hierarchy
+                    </p>
+                    <span className="font-mono text-[8px] text-[#00d4ff]">LIVE GIS</span>
+                </div>
+                <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-[9px]">
+                    <span className="flex items-center gap-1.5">
+                        <span className="inline-block h-2 w-2 rounded-sm bg-[#ef4444] border border-[#fca5a5]" />
+                        <span className="font-semibold text-[#f8fafc]">Spill Detection</span>
+                    </span>
+                    <span className="flex items-center gap-1.5">
+                        <span className="inline-block h-2 w-2 rounded-full bg-[#0284c7] border border-[#7dd3fc]" />
+                        <span className="text-[#cbd5e1]">Hindcast Origin</span>
+                    </span>
+                    <span className="flex items-center gap-1.5">
+                        <span className="inline-block h-2 w-2 rounded-sm border border-dashed border-[#06b6d4] bg-[#06b6d4]/20" />
+                        <span className="text-[#cbd5e1]">Forecast Envelope</span>
+                    </span>
+                    <span className="flex items-center gap-1.5">
+                        <span className="inline-block h-2 w-2 rounded-full bg-[#22d4ee]" />
+                        <span className="text-[#cbd5e1]">Forecast Centroid</span>
+                    </span>
+                    <span className="flex items-center gap-1.5">
+                        <span className="inline-block h-0.5 w-3 bg-[#f59e0b]" />
+                        <span className="font-semibold text-[#f59e0b]">Winner Path</span>
+                    </span>
+                    <span className="flex items-center gap-1.5">
+                        <span className="inline-block h-0.5 w-3 bg-[#475569]" />
+                        <span className="text-[#64748b]">AIS Vessel Track</span>
+                    </span>
+                </div>
+                {/* Scale reference bar */}
+                <div className="mt-2.5 flex items-center justify-between border-t border-[#1b344b]/60 pt-1.5 font-mono text-[8px] text-[#5a7d96]">
+                    <span>0</span>
+                    <div className="mx-2 h-1 flex-1 border-b border-l border-r border-[#334e68]" />
+                    <span>40 km</span>
                 </div>
             </div>
+
+            {/* Bottom-Right: Tactical Map Controls */}
+            <div className="absolute bottom-3 right-3 z-20 flex flex-col gap-1.5">
+                {/* Compass / Reset North */}
+                <button
+                    type="button"
+                    onClick={() => mapRef.current?.resetNorthPitch({ duration: 400 })}
+                    className="flex h-8 w-8 items-center justify-center rounded border border-[#1b344b] bg-[#030d17]/90 text-[#7ab8d0] shadow-md backdrop-blur-sm transition hover:border-[#00d4ff]/50 hover:bg-[#0c2438] hover:text-[#00d4ff]"
+                    title="Reset North & Pitch"
+                >
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none">
+                        <polygon points="12 2 18 21 12 17 6 21 12 2" fill="#ef4444" />
+                        <polygon points="12 17 18 21 12 2" fill="#64748b" />
+                    </svg>
+                </button>
+
+                {/* Recenter on Spill Centroid */}
+                <button
+                    type="button"
+                    onClick={() => {
+                        if (analysis && mapRef.current) {
+                            mapRef.current.flyTo({
+                                center: [analysis.detection.centroid_latlon.lon, analysis.detection.centroid_latlon.lat],
+                                zoom: 8.5,
+                                duration: 600,
+                            });
+                        }
+                    }}
+                    className="flex h-8 w-8 items-center justify-center rounded border border-[#1b344b] bg-[#030d17]/90 text-[#7ab8d0] shadow-md backdrop-blur-sm transition hover:border-[#00d4ff]/50 hover:bg-[#0c2438] hover:text-[#00d4ff]"
+                    title="Recenter on Spill Incident"
+                >
+                    <span className="text-sm leading-none">⌖</span>
+                </button>
+
+                {/* Zoom In */}
+                <button
+                    type="button"
+                    onClick={() => mapRef.current?.zoomIn({ duration: 250 })}
+                    className="flex h-8 w-8 items-center justify-center rounded border border-[#1b344b] bg-[#030d17]/90 text-[#7ab8d0] shadow-md backdrop-blur-sm transition hover:border-[#00d4ff]/50 hover:bg-[#0c2438] hover:text-[#00d4ff]"
+                    title="Zoom In"
+                >
+                    <span className="text-base font-bold leading-none">+</span>
+                </button>
+
+                {/* Zoom Out */}
+                <button
+                    type="button"
+                    onClick={() => mapRef.current?.zoomOut({ duration: 250 })}
+                    className="flex h-8 w-8 items-center justify-center rounded border border-[#1b344b] bg-[#030d17]/90 text-[#7ab8d0] shadow-md backdrop-blur-sm transition hover:border-[#00d4ff]/50 hover:bg-[#0c2438] hover:text-[#00d4ff]"
+                    title="Zoom Out"
+                >
+                    <span className="text-base font-bold leading-none">−</span>
+                </button>
+            </div>
+
             {/* Error banner */}
-            {loadError && <div className="pointer-events-none absolute bottom-3 right-20 z-10 rounded-sm border border-[#b85a3a]/50 bg-[#020b14]/95 px-3 py-1.5 text-[10px] text-[#d97a4a]">API data unavailable · basemap active</div>}
+            {loadError && (
+                <div className="pointer-events-none absolute bottom-3 right-14 z-10 rounded border border-[#ef4444]/40 bg-[#030d17]/95 px-3 py-1.5 text-[10px] text-[#ef4444]">
+                    API data unavailable · basemap active
+                </div>
+            )}
         </div>
     );
 }
