@@ -99,6 +99,64 @@ def train_behavioral_prior(ais_df, seq_len=20, n_epochs=60, seed=0, verbose=True
     return vessel_max
 
 
+def get_vessel_embeddings(ais_df, seq_len=20, n_epochs=60, seed=0):
+    """
+    Same training loop as train_behavioral_prior(), but instead of returning
+    a scalar peak-window reconstruction error per vessel, returns the LSTM's
+    final hidden state (last timestep of the raw LSTM output, taken before
+    VesselBehaviorEncoder.output()) at each vessel's peak-error window, as a
+    fixed-length embedding vector.
+
+    Return: dict {mmsi: np.ndarray of shape (hidden_size,)}
+    """
+    torch.manual_seed(seed)
+
+    ais_df = ais_df.copy()
+    ais_df["BaseDateTime"] = ais_df["BaseDateTime"] if str(ais_df["BaseDateTime"].dtype) == "datetime64[ns]" \
+        else ais_df["BaseDateTime"]
+
+    windows, mmsi_per_window, start_idx_per_window = build_windows(ais_df, seq_len=seq_len)
+    if len(windows) == 0:
+        raise RuntimeError("No AIS windows built -- check track lengths vs seq_len.")
+
+    X = torch.tensor(windows, dtype=torch.float32)
+    X_mean = X.mean(dim=(0, 1), keepdim=True)
+    X_std = X.std(dim=(0, 1), keepdim=True) + 1e-6
+    X_norm = (X - X_mean) / X_std
+
+    model = VesselBehaviorEncoder(n_features=X.shape[2])
+    optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+
+    model.train()
+    for epoch in range(n_epochs):
+        optimizer.zero_grad()
+        pred = model(X_norm)
+        loss = torch.mean((pred[:, :-1, :] - X_norm[:, 1:, :]) ** 2)
+        loss.backward()
+        optimizer.step()
+
+    model.eval()
+    with torch.no_grad():
+        pred = model(X_norm)
+        per_window_error = torch.mean((pred[:, :-1, :] - X_norm[:, 1:, :]) ** 2, dim=(1, 2))
+
+        # Raw LSTM output (batch, seq_len, hidden_size) -- the hidden state
+        # per timestep, before VesselBehaviorEncoder.output() is applied.
+        # h[:, -1, :] is the final timestep's hidden state (h_n) per window.
+        h, _ = model.lstm(X_norm)
+        window_embeddings = h[:, -1, :]  # (n_windows, hidden_size)
+
+    vessel_embeddings = {}
+    for mmsi_val in sorted(set(mmsi_per_window)):
+        idx = [i for i, m in enumerate(mmsi_per_window) if m == mmsi_val]
+        errs = per_window_error[idx]
+        local_peak = int(torch.argmax(errs).item())
+        peak_global_idx = idx[local_peak]
+        vessel_embeddings[mmsi_val] = window_embeddings[peak_global_idx].numpy()
+
+    return vessel_embeddings
+
+
 if __name__ == "__main__":
     import pandas as pd
     from ais_synthetic import generate_ais, ANOMALOUS_MMSI

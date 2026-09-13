@@ -14,8 +14,10 @@ h = (vessel_mmsi, t0)
   separate ranking module, exactly as the architecture diagram states.
 """
 
+from pathlib import Path
 import numpy as np
 import pandas as pd
+import torch
 
 from drift import (
     REAL_SINKING, REAL_DETECTION, REAL_ELAPSED_HOURS,
@@ -24,8 +26,11 @@ from drift import (
 from footprint import particle_cloud_footprint, iou
 from agelikelihood import age_likelihood
 from ais_synthetic import generate_ais, ANOMALOUS_MMSI
-from behavioral import train_behavioral_prior
+from behavioral import train_behavioral_prior, get_vessel_embeddings
 from detection_layer0 import run_layer0
+from event_embedding import build_event_embedding
+from attention_web import CausalAttentionWeb
+import custodes
 
 # Candidate elapsed times (hours before detection) to hypothesize over.
 # Coarse (12h) outside the plausible window, fine (2h) across 48-96h --
@@ -35,6 +40,8 @@ from detection_layer0 import run_layer0
 # gap. 2h steps cut that quantization error from +/-3h to +/-1h.
 CANDIDATE_T0_HOURS = [12, 24, 36] + list(range(48, 97, 2)) + [108, 120]
 OIL_TYPE = "arabian_light"
+_DEFAULT_CKPT = Path(__file__).resolve().parent / "caw_weights.pt"
+CAW_CHECKPOINT_PATH = str(_DEFAULT_CKPT) if _DEFAULT_CKPT.exists() else "caw_weights.pt"
 
 
 def get_vessel_positions_at_t0(ais_df, t0_hours_before_obs, t_obs):
@@ -100,6 +107,51 @@ def run_pipeline(verbose=True):
 
     scores_df = pd.DataFrame(all_scores)
 
+    # ---- A7: CAW alpha (parallel to score, doesn't replace it) + Custodes
+    caw_status = None
+    alpha = None
+    try:
+        vessel_embeddings = get_vessel_embeddings(ais_df, seed=0)
+        event_embedding = torch.tensor(build_event_embedding(detection), dtype=torch.float32)
+        caw = CausalAttentionWeb(event_dim=event_embedding.shape[-1], candidate_dim=64)
+        caw.load_state_dict(torch.load(CAW_CHECKPOINT_PATH))
+        caw.eval()
+
+        # Reuse this same run's already-computed L_shape/L_age -- no need
+        # to recompute physics_bias, it's exactly what A5 trained CAW on.
+        candidate_embeddings = torch.tensor(
+            np.stack([vessel_embeddings[row["mmsi"]] for row in all_scores]), dtype=torch.float32
+        )
+        physics_bias = torch.tensor(
+            [np.log(max(row["L_shape"], 1e-6)) + np.log(max(row["L_age"], 1e-6)) for row in all_scores],
+            dtype=torch.float32,
+        )
+        with torch.no_grad():
+            alpha = caw(event_embedding, candidate_embeddings, physics_bias).numpy()
+        scores_df["alpha"] = alpha[:-1]
+        null_alpha = float(alpha[-1])
+
+        caw_status = custodes.evaluate(scores_df[["mmsi", "t0_hours", "alpha"]], null_alpha)
+        caw_status["null_alpha"] = null_alpha
+
+        if verbose:
+            alpha_map_row = scores_df.loc[scores_df["alpha"].idxmax()]
+            score_map_row = scores_df.loc[scores_df["score"].idxmax()]
+            print(f"\n[CAW/Custodes] score-based MAP: mmsi={int(score_map_row['mmsi'])} "
+                  f"t0={score_map_row['t0_hours']:.0f}h")
+            print(f"[CAW/Custodes] alpha-based MAP:  mmsi={int(alpha_map_row['mmsi'])} "
+                  f"t0={alpha_map_row['t0_hours']:.0f}h "
+                  f"{'(MATCH)' if int(alpha_map_row['mmsi']) == int(score_map_row['mmsi']) else '(MISMATCH -- treat with suspicion before trusting alpha over score)'}")
+            print(f"[Custodes] decision={caw_status['decision']} margin={caw_status['margin']:.3f} "
+                  f"top_vessel={caw_status['top_vessel']}")
+    except FileNotFoundError:
+        if verbose:
+            print(f"\n[CAW/Custodes] {CAW_CHECKPOINT_PATH} not found -- skipping alpha/Custodes "
+                  f"(run train_attention_web.py first). score-based pipeline unaffected.")
+    except RuntimeError as e:
+        if verbose:
+            print(f"\n[CAW/Custodes] skipped: {e}")
+
     # ---- Backward hindcast: MAP hypothesis
     map_row = scores_df.loc[scores_df["score"].idxmax()]
 
@@ -134,6 +186,10 @@ def run_pipeline(verbose=True):
         "forecast_centroid_lonlat": forecast_centroid.tolist() if forecast_centroid is not None else None,
         "forward_particles": forward_particles,
         "forward_beached": forward_beached,
+        "alpha": alpha,
+        "custodes_status": caw_status,  # None if caw_weights.pt missing/threshold unset
+        "vessel_alpha_all": (scores_df.groupby("mmsi")["alpha"].sum().to_dict()
+                              if "alpha" in scores_df.columns else None),
     }
 
 

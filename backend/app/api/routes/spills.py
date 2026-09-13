@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from app.db.database import get_db
 from app.models.spill import Spill
 from app.schemas.analysis import SpillAnalysisResponse
+from app.schemas.caw import AlphaSurfaceResponse, CustodesStatusResponse
 from app.schemas.spill import SpillListResponse, SpillResponse
 from app.services.sakshi_adapter import SakshiAdapter
 
@@ -84,3 +85,50 @@ def get_spill_analysis(spill_id: int, db: Session = Depends(get_db)) -> SpillAna
             status_code=503,
             detail="ML analysis data unavailable. Run the Sakshi pipeline to generate output_for_ui.json.",
         )
+
+
+@router.get("/{spill_id}/alpha-surface", response_model=AlphaSurfaceResponse)
+def get_spill_alpha_surface(spill_id: int, db: Session = Depends(get_db)) -> AlphaSurfaceResponse:
+    """
+    Get CAW vessel × t0 alpha surface for a spill detection.
+
+    Returns:
+        AlphaSurfaceResponse with vessel_ids, t0_hours, and 2D alpha matrix.
+    """
+    # Verify the spill exists in the database
+    spill = db.execute(select(Spill).where(Spill.id == spill_id)).first()
+    if not spill:
+        raise HTTPException(status_code=404, detail="Spill not found")
+
+    adapter = SakshiAdapter()
+    try:
+        return adapter.get_alpha_surface(spill_id)
+    except FileNotFoundError:
+        raise HTTPException(
+            status_code=503,
+            detail="ML analysis data unavailable. Run the Sakshi pipeline to generate output_for_ui.json.",
+        )
+
+
+@router.get("/{spill_id}/custodes-status", response_model=CustodesStatusResponse)
+def get_spill_custodes_status(spill_id: int, db: Session = Depends(get_db)) -> CustodesStatusResponse:
+    """
+    Get server-generated Custodes decision status for a spill detection.
+
+    Returns:
+        CustodesStatusResponse with decision, margin, top/second vessel scores.
+    """
+    # Verify the spill exists in the database
+    spill = db.execute(select(Spill).where(Spill.id == spill_id)).first()
+    if not spill:
+        raise HTTPException(status_code=404, detail="Spill not found")
+
+    adapter = SakshiAdapter()
+    try:
+        return adapter.get_custodes_status(spill_id)
+    except FileNotFoundError:
+        raise HTTPException(
+            status_code=503,
+            detail="ML analysis data unavailable. Run the Sakshi pipeline to generate output_for_ui.json.",
+        )
+

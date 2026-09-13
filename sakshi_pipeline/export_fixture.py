@@ -40,6 +40,17 @@ def main():
         for mmsi, score in result["vessel_ranking"].head(5).items()
     ]
 
+    scores_df = result["scores_df"]
+    alpha_surface = None
+    if "alpha" in scores_df.columns:
+        piv = scores_df.pivot(index="mmsi", columns="t0_hours", values="alpha")
+        alpha_surface = {
+            "vessel_ids": [int(x) for x in piv.index],
+            "t0_hours": [float(x) for x in piv.columns],
+            "alpha": piv.values.tolist(),
+            "null_alpha": float(result["custodes_status"]["null_alpha"]) if result.get("custodes_status") and "null_alpha" in result["custodes_status"] else None,
+        }
+
     output = {
         "detection": {
             "polygon_latlon": result["detection"]["polygon_latlon"],
@@ -61,6 +72,25 @@ def main():
         },
         "age_estimate_hours": result["age_estimate_hours"],
         "vessel_ranking_top5": top5,
+        "vessel_alpha_all": (
+            [{"mmsi": int(mmsi), "alpha": float(a), "is_injected_anomaly": int(mmsi) == ANOMALOUS_MMSI}
+             for mmsi, a in result["vessel_alpha_all"].items()]
+            if result.get("vessel_alpha_all") else None
+        ),
+        "alpha_surface": alpha_surface,
+        "custodes_status": (
+            {"decision": result["custodes_status"]["decision"],
+             "margin": result["custodes_status"]["margin"],
+             "top_vessel": result["custodes_status"]["top_vessel"],
+             "top_vessel_score": result["custodes_status"]["top_vessel_score"],
+             "second_vessel": result["custodes_status"]["second_vessel"],
+             "second_vessel_score": result["custodes_status"]["second_vessel_score"],
+             "same_vessel_top2_rows": result["custodes_status"]["same_vessel_top2_rows"],
+             "null_alpha": result["custodes_status"].get("null_alpha")}
+            if result.get("custodes_status") else None
+        ),
+        "abstain_flag": (result["custodes_status"]["abstain_flag"]
+                          if result.get("custodes_status") else None),
         "forward_forecast_centroid_lonlat": result["forecast_centroid_lonlat"],
         # Non-beached particle cloud (GeoJSON FeatureCollection)
         "forward_particle_cloud": (lambda particles, beached: {
@@ -89,6 +119,7 @@ def main():
             "L_age": "fully real weathering + age-likelihood model",
             "prior / vessel_ranking": "real behavioral model, trained on SYNTHETIC AIS traffic",
             "land_masking": "real offline GSHHG-derived land/sea grid (global-land-mask package)",
+            "vessel_alpha_all / custodes_status": "trained on synthetic decoy-episodes anchored to this incident's real signature (event embedding from the real Layer0 detection, held fixed across all training episodes), held-out validated on 40 episodes not used for gradient updates (seeds 200-239, disjoint from the 200 training seeds). At the validated margin threshold: COMMIT precision 93.9% (33/40 episodes), 57.1% of flagged (non-COMMIT) episodes were correctly-caught wrong predictions. All observed errors were false-positive vessel attribution on no-anomaly episodes (CAW correctly identified the true vessel in 20/20 positive episodes) -- see custodes.py's module docstring and evaluate_margin_threshold_v2.py for the full validation protocol. Demo-level estimate from 40 held-out episodes, not a statistically tight bound. Not hand-tuned.",
         },
     }
 

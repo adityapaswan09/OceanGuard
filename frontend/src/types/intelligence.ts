@@ -77,3 +77,34 @@ export interface SuspectCandidate {
     historical_risk_score: number | null;
     reasons: string[] | null;
 }
+
+export interface VesselAlphaItem {
+    mmsi: number;
+    alpha: number;
+    is_injected_anomaly: boolean;
+}
+
+export interface AlphaSurfaceResponse {
+    spill_id: number;
+    vessel_ids: number[];
+    t0_hours: number[];
+    alpha: number[][];
+    null_alpha: number | null;
+    vessel_alpha_all?: VesselAlphaItem[];
+}
+
+export type CustodesDecision = "COMMIT" | "REFINE_GRID" | "ABSTAIN";
+
+export interface CustodesStatusResponse {
+    spill_id: number;
+    decision: CustodesDecision;
+    top_vessel: number | null;
+    top_vessel_score: number | null;
+    second_vessel: number | null;
+    second_vessel_score: number | null;
+    margin: number | null;
+    same_vessel_top2_rows: boolean | null;
+    abstain_flag: boolean | null;
+    null_alpha: number | null;
+}
+

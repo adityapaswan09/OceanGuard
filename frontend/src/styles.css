@@ -5,8 +5,8 @@
 @tailwind utilities;
 
 :root {
-    color: #173247;
-    background: #f4f8fb;
+    color: #e8f0f5;
+    background: #020b14;
     font-family: "DM Sans", sans-serif;
     font-synthesis: none;
     text-rendering: optimizeLegibility;
@@ -16,37 +16,79 @@
     box-sizing: border-box;
 }
 
-body {
+html, body {
     margin: 0;
     min-width: 320px;
     min-height: 100vh;
-    background: #f4f8fb;
+    background: #020b14;
+    color: #e8f0f5;
+}
+
+body {
+    background: radial-gradient(ellipse at 50% 0%, #0a1c2c 0%, #020b14 70%);
 }
 
 button {
     font: inherit;
+    color: inherit;
 }
 
 button:focus-visible {
-    outline: 1px solid #087ea4;
+    outline: 1px solid #00d4ff;
     outline-offset: 2px;
 }
 
+/* Custom scrollbar - dark theme */
 ::-webkit-scrollbar {
-    width: 7px;
-    height: 7px;
+    width: 6px;
+    height: 6px;
 }
 
 ::-webkit-scrollbar-track {
-    background: #f4f8fb;
+    background: #020b14;
 }
 
 ::-webkit-scrollbar-thumb {
-    background: #b4c8d3;
+    background: #1e3a52;
+    border-radius: 3px;
 }
 
+::-webkit-scrollbar-thumb:hover {
+    background: #2a4a6a;
+}
+
+/* Selection */
+::selection {
+    background: rgba(0, 212, 255, 0.3);
+    color: #e8f0f5;
+}
+
+/* Map grid overlay for dark theme */
+.map-grid {
+    background-image: linear-gradient(rgba(0, 212, 255, 0.08) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(0, 212, 255, 0.08) 1px, transparent 1px);
+    background-size: 54px 54px;
+}
+
+.map-wash {
+    background: linear-gradient(135deg, rgba(0, 80, 120, 0.2), rgba(0, 40, 60, 0.3));
+}
+
+.satellite-texture {
+    background-color: #1a2a3a;
+    background-image: radial-gradient(ellipse at 20% 22%, rgba(80, 120, 140, .3) 0 12%, transparent 13%),
+        radial-gradient(ellipse at 72% 62%, rgba(20, 50, 70, .4) 0 15%, transparent 16%),
+        radial-gradient(ellipse at 44% 76%, rgba(60, 100, 120, .25) 0 10%, transparent 11%),
+        linear-gradient(35deg, rgba(0, 20, 40, .5), transparent 48%);
+}
+
+.panel-shadow {
+    box-shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
+}
+
+/* Eyebrow style - kept for compatibility */
 .eyebrow {
-    color: rgba(169, 196, 192, 0.48);
+    color: rgba(90, 125, 150, 0.7);
     font-family: "DM Sans", sans-serif;
     font-size: 9px;
     font-weight: 600;
@@ -54,22 +96,130 @@ button:focus-visible {
     text-transform: uppercase;
 }
 
-.map-grid {
-    background-image: linear-gradient(rgba(255, 255, 255, 0.45) 1px, transparent 1px), linear-gradient(90deg, rgba(255, 255, 255, 0.45) 1px, transparent 1px);
-    background-size: 54px 54px;
+/* MapLibre overrides for dark theme */
+.maplibregl-ctrl-attrib {
+    background: rgba(2, 11, 20, 0.85) !important;
+    color: #5a7d96 !important;
+    font-size: 9px !important;
+    padding: 2px 6px !important;
+    border-top-left-radius: 4px !important;
 }
 
-.map-wash {
-    background: linear-gradient(135deg, rgba(65, 126, 112, 0.18), rgba(236, 242, 220, 0.26));
+.maplibregl-ctrl-attrib a {
+    color: #00d4ff !important;
 }
 
-.satellite-texture {
-    background-color: #739a8a;
-    background-image: radial-gradient(ellipse at 20% 22%, rgba(215, 226, 193, .65) 0 12%, transparent 13%), radial-gradient(ellipse at 72% 62%, rgba(39, 99, 94, .55) 0 15%, transparent 16%), radial-gradient(ellipse at 44% 76%, rgba(183, 198, 159, .7) 0 10%, transparent 11%), linear-gradient(35deg, rgba(28, 85, 88, .36), transparent 48%);
+.maplibregl-ctrl-group button {
+    background: #0a1c2c !important;
+    border: 1px solid #1e3a52 !important;
+    color: #e8f0f5 !important;
+    width: 32px !important;
+    height: 32px !important;
 }
 
-.panel-shadow {
-    box-shadow: 0 2px 14px rgba(21, 62, 83, .06);
+.maplibregl-ctrl-group button:hover {
+    background: #0d2235 !important;
+    border-color: #00d4ff !important;
+}
+
+.maplibregl-ctrl-group button span {
+    filter: invert(1) !important;
+}
+
+.maplibregl-ctrl-zoom-in,
+.maplibregl-ctrl-zoom-out {
+    width: 32px !important;
+    height: 32px !important;
+}
+
+.maplibregl-popup-content {
+    background: #0a1c2c !important;
+    color: #e8f0f5 !important;
+    border: 1px solid #1e3a52 !important;
+    border-radius: 4px !important;
+    padding: 8px 12px !important;
+    font-size: 11px !important;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5) !important;
+}
+
+.maplibregl-popup-tip {
+    border-top-color: #0a1c2c !important;
+}
+
+.maplibregl-popup-close-button {
+    color: #5a7d96 !important;
+    font-size: 16px !important;
+    padding: 2px 4px !important;
+}
+
+.maplibregl-popup-close-button:hover {
+    color: #e8f0f5 !important;
+    background: transparent !important;
+}
+
+/* Glow effects */
+.glow-cyan {
+    box-shadow: 0 0 12px rgba(0, 212, 255, 0.3), 0 0 24px rgba(0, 212, 255, 0.1);
+}
+
+.glow-amber {
+    box-shadow: 0 0 12px rgba(245, 158, 11, 0.4), 0 0 24px rgba(245, 158, 11, 0.15);
+}
+
+.glow-spill {
+    box-shadow: 0 0 16px rgba(231, 76, 60, 0.4), 0 0 32px rgba(231, 76, 60, 0.2);
+}
+
+/* Map marker pulse animation */
+@keyframes marker-pulse {
+    0% {
+        transform: scale(1);
+        opacity: 0.8;
+    }
+    50% {
+        transform: scale(1.15);
+        opacity: 0.4;
+    }
+    100% {
+        transform: scale(1);
+        opacity: 0.8;
+    }
+}
+
+@keyframes ring-expand {
+    0% {
+        transform: scale(0.8);
+        opacity: 0.6;
+    }
+    100% {
+        transform: scale(2);
+        opacity: 0;
+    }
+}
+
+.marker-pulse {
+    animation: marker-pulse 2s ease-in-out infinite;
+}
+
+.marker-ring {
+    animation: ring-expand 2s ease-out infinite;
+}
+
+/* Professional monospace for data */
+.font-data {
+    font-family: "Space Grotesk", "DM Sans", monospace;
+}
+
+/* Panel glass effect */
+.panel-glass {
+    background: rgba(10, 28, 44, 0.85);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+}
+
+/* Divider lines */
+.divider-subtle {
+    border-color: rgba(30, 58, 82, 0.6);
 }
 
 @media (max-width: 1023px) {

@@ -15,6 +15,7 @@ from app.schemas.analysis import (
 from app.schemas.hindcast import HindcastResponse
 from app.schemas.forecast import ForecastResponse
 from app.schemas.environment import EnvironmentResponse
+from app.schemas.caw import AlphaSurfaceResponse, CustodesStatusResponse
 
 
 class SakshiAdapter:
@@ -194,4 +195,52 @@ class SakshiAdapter:
             current_direction=None,
             wind_vectors=None,
             current_vectors=None,
+        )
+
+    def get_vessel_alpha_all(self, spill_id: int) -> List[dict]:
+        """Return all vessels with their aggregated CAW alpha score."""
+        data = self._load_fixture()
+        alpha_all = data.get("vessel_alpha_all", [])
+        return sorted(alpha_all, key=lambda v: v.get("alpha", 0.0), reverse=True)
+
+    def get_alpha_surface(self, spill_id: int) -> AlphaSurfaceResponse:
+        """Return CAW vessel x t0 alpha surface from fixture."""
+        data = self._load_fixture()
+        surface = data.get("alpha_surface")
+        if not surface:
+            raise FileNotFoundError(
+                "alpha_surface not found in Sakshi fixture. "
+                "Run export_fixture.py to generate updated output_for_ui.json."
+            )
+
+        return AlphaSurfaceResponse(
+            spill_id=spill_id,
+            vessel_ids=surface["vessel_ids"],
+            t0_hours=surface["t0_hours"],
+            alpha=surface["alpha"],
+            null_alpha=surface.get("null_alpha"),
+            vessel_alpha_all=data.get("vessel_alpha_all"),
+        )
+
+    def get_custodes_status(self, spill_id: int) -> CustodesStatusResponse:
+        """Return Custodes decision metadata from fixture."""
+        data = self._load_fixture()
+        status_obj = data.get("custodes_status")
+        if not status_obj:
+            raise FileNotFoundError(
+                "custodes_status not found in Sakshi fixture. "
+                "Run export_fixture.py to generate updated output_for_ui.json."
+            )
+
+        return CustodesStatusResponse(
+            spill_id=spill_id,
+            decision=status_obj["decision"],
+            top_vessel=status_obj.get("top_vessel"),
+            top_vessel_score=status_obj.get("top_vessel_score"),
+            second_vessel=status_obj.get("second_vessel"),
+            second_vessel_score=status_obj.get("second_vessel_score"),
+            margin=status_obj.get("margin"),
+            same_vessel_top2_rows=status_obj.get("same_vessel_top2_rows"),
+            abstain_flag=data.get("abstain_flag", status_obj.get("abstain_flag")),
+            null_alpha=status_obj.get("null_alpha"),
         )

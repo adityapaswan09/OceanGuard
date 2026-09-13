@@ -7,8 +7,8 @@ import { MapSurface } from "../components/map/MapSurface";
 import { TimelineBar } from "../components/operations/TimelineBar";
 import { VesselWatchlist } from "../components/vessels/VesselWatchlist";
 import { AlertsPage, type AlertRecord } from "./AlertsPage";
-import { API_BASE_URL } from "../services/api";
-import type { AisTrack, SpillAnalysis, SuspectCandidate } from "../types/intelligence";
+import { API_BASE_URL, getAlphaSurface, getCustodesStatus } from "../services/api";
+import type { AisTrack, AlphaSurfaceResponse, CustodesStatusResponse, SpillAnalysis, SuspectCandidate } from "../types/intelligence";
 
 const selectedSpillId = 1;
 type VesselRecord = { id: number; name: string; vessel_type?: string | null; flag?: string | null };
@@ -24,10 +24,58 @@ export function OperationsPage() {
     const [selectedSuspectId, setSelectedSuspectId] = useState<number | null>(null);
     const [detectionTime, setDetectionTime] = useState<string | null>(null);
     const [analysis, setAnalysis] = useState<SpillAnalysis | null>(null);
+    const [alphaSurface, setAlphaSurface] = useState<AlphaSurfaceResponse | null>(null);
+    const [custodesStatus, setCustodesStatus] = useState<CustodesStatusResponse | null>(null);
+    const [identifyLoading, setIdentifyLoading] = useState(false);
+    const [identifyError, setIdentifyError] = useState(false);
+    const [identifyRun, setIdentifyRun] = useState(0);
 
     const handleAlertOpen = (alert: AlertRecord) => {
         setActiveSection("Overview");
         if (alert.spillId) setActiveTab("Timeline");
+    };
+
+    const handleIdentifySuspects = () => {
+        if (identifyLoading) return;
+        setIdentifyLoading(true);
+        setIdentifyError(false);
+        // Each click is a new animation run: MapView replays the winner flight on every run token.
+        setIdentifyRun((run) => run + 1);
+        Promise.all([getAlphaSurface(selectedSpillId), getCustodesStatus(selectedSpillId)])
+            .then(([surface, status]) => {
+                setAlphaSurface(surface);
+                setCustodesStatus(status);
+                // Ensure the CAW winning vessel's AIS track is loaded so the gold highlight and the
+                // hindcast-origin animation can render without the user having visited "AIS Analysis".
+                const winnerId = status.top_vessel;
+                if (winnerId !== null && !aisTracks.some((track) => track.vesselId === winnerId)) {
+                    fetch(`${API_BASE_URL}/vessels/${winnerId}/track`)
+                        .then((response) => {
+                            if (!response.ok) throw new Error("Vessel track unavailable");
+                            return response.json();
+                        })
+                        .then((track: { points?: AisTrack["points"] }) => {
+                            const points = track.points;
+                            if (!points?.length) return;
+                            const winnerName = suspects.find((candidate) => candidate.vessel_id === winnerId)?.vessel_name ?? `Vessel ${winnerId}`;
+                            setAisTracks((prevTracks) => {
+                                if (prevTracks.some((t) => t.vesselId === winnerId)) return prevTracks;
+                                return [...prevTracks, { vesselId: winnerId, vesselName: winnerName, vesselType: null, flag: null, points }];
+                            });
+                        })
+                        .catch(() => {
+                            // Leave existing tracks as-is; identification result and panel stay usable.
+                        });
+                }
+            })
+            .catch(() => {
+                setAlphaSurface(null);
+                setCustodesStatus(null);
+                setIdentifyError(true);
+            })
+            .finally(() => {
+                setIdentifyLoading(false);
+            });
     };
 
     useEffect(() => {
@@ -152,7 +200,40 @@ export function OperationsPage() {
         };
     }, [selectedSuspectId, suspects]);
 
+    const winningVesselId = custodesStatus?.top_vessel ?? null;
+    const identified = alphaSurface !== null && custodesStatus !== null && !identifyError;
+    const cawActive = identified && winningVesselId !== null;
+
     const kpis = [["Active spills", "01", "Elevated"], ["Total area", analysis ? `${analysis.detection.physical_area_km2.toFixed(2)} km²` : "—", "Current incident"], ["Monitored vessels", "148", "AIS coverage"], ["Alerts", "03", "2 unread"]];
 
-    return <AppShell activeSection={activeSection} onNavigate={setActiveSection}>{activeSection === "Alerts" ? <AlertsPage onOpenAlert={handleAlertOpen} /> : <main className="flex min-w-0 flex-1 flex-col overflow-auto"><div className="border-b border-line bg-white px-5 py-5 lg:px-7"><div className="flex items-end justify-between"><div><div className="mb-2 flex items-center gap-2 text-[10px] text-mist"><span>Overview</span><span>/</span><span className="text-signal">Regional monitoring</span></div><h1 className="font-display text-2xl font-semibold text-[#173247]">Regional Overview</h1><p className="mt-1 text-xs text-mist">Monitor active spills, vessel traffic, and environmental conditions across the Arabian Sea.</p></div><div className="hidden items-center gap-2 sm:flex"><span className="eyebrow">Region</span><button className="rounded-sm border border-line bg-[#f7fafc] px-3 py-2 text-xs font-medium text-[#173247]" type="button">Arabian Sea <span className="ml-5 text-mist">⌄</span></button></div></div><div className="mt-5 grid grid-cols-2 gap-2 xl:grid-cols-4">{kpis.map(([label, value, note]) => <div className="rounded-sm border border-line bg-[#fbfdfe] px-4 py-3" key={label}><p className="eyebrow">{label}</p><div className="mt-2 flex items-end justify-between"><p className="font-display text-xl font-semibold text-[#173247]">{value}</p><p className="text-[9px] text-mist">{note}</p></div></div>)}</div></div><div className="grid min-h-[520px] flex-1 grid-cols-1 lg:grid-cols-[248px_minmax(0,1fr)_310px]"><IncidentRail analysis={analysis} /><div className="flex min-h-0 min-w-0 flex-col"><MapSurface activeLayer={activeLayer} onLayerChange={setActiveLayer} investigationTab={activeTab} aisTracks={aisTracks} highlightedVesselId={selectedSuspectId} analysis={analysis} /><VesselWatchlist /></div><InvestigationPanel activeTab={activeTab} onTabChange={setActiveTab} suspects={suspects} suspectsLoading={suspectsLoading} suspectsError={suspectsError} selectedSuspectId={selectedSuspectId} onSuspectSelect={setSelectedSuspectId} detectionTime={detectionTime} analysis={analysis} /></div><TimelineBar /></main>}</AppShell>;
+    return <AppShell activeSection={activeSection} onNavigate={setActiveSection}>{activeSection === "Alerts" ? <AlertsPage onOpenAlert={handleAlertOpen} /> : <main className="flex min-w-0 flex-1 flex-col overflow-auto"><div className="border-b border-line bg-panel/90 px-5 py-5 lg:px-7"><div className="flex items-end justify-between"><div><div className="mb-2 flex items-center gap-2 text-[10px] text-mist"><span>Overview</span><span>/</span><span className="text-signal">Regional monitoring</span></div><h1 className="font-display text-2xl font-semibold text-ink">Regional Overview</h1><p className="mt-1 text-xs text-mist">Monitor active spills, vessel traffic, and environmental conditions across the Arabian Sea.</p></div><div className="hidden items-center gap-2 sm:flex"><span className="eyebrow">Region</span><button className="rounded-sm border border-line bg-panelAlt px-3 py-2 text-xs font-medium text-ink" type="button">Arabian Sea <span className="ml-5 text-mist">⌄</span></button></div></div><div className="mt-5 grid grid-cols-2 gap-2 xl:grid-cols-4">{kpis.map(([label, value, note]) => <div className="rounded-sm border border-line bg-panelAlt px-4 py-3" key={label}><p className="eyebrow">{label}</p><div className="mt-2 flex items-end justify-between"><p className="font-display text-xl font-semibold text-ink">{value}</p><p className="text-[9px] text-mist">{note}</p></div></div>)}</div></div><div className="grid min-h-[520px] flex-1 grid-cols-1 lg:grid-cols-[248px_minmax(0,1fr)_310px]"><IncidentRail analysis={analysis} /><div className="flex min-h-0 min-w-0 flex-col"><MapSurface
+                            activeLayer={activeLayer}
+                            onLayerChange={setActiveLayer}
+                            investigationTab={activeTab}
+                            aisTracks={aisTracks}
+                            highlightedVesselId={selectedSuspectId}
+                            analysis={analysis}
+                            cawActive={cawActive}
+                            winningVesselId={winningVesselId}
+                            isIdentifying={identifyLoading}
+                            identifyRun={identifyRun}
+                            identified={identified}
+                        /><VesselWatchlist /></div><InvestigationPanel
+                            activeTab={activeTab}
+                            onTabChange={setActiveTab}
+                            suspects={suspects}
+                            suspectsLoading={suspectsLoading}
+                            suspectsError={suspectsError}
+                            selectedSuspectId={selectedSuspectId}
+                            onSuspectSelect={setSelectedSuspectId}
+                            detectionTime={detectionTime}
+                            analysis={analysis}
+                            onIdentifySuspects={handleIdentifySuspects}
+                            identifyLoading={identifyLoading}
+                            identifyError={identifyError}
+                            identified={identified}
+                            alphaSurface={alphaSurface}
+                            custodes={custodesStatus}
+                            winningVesselId={winningVesselId}
+                        /></div><TimelineBar /></main>}</AppShell>;
 }

@@ -1,4 +1,13 @@
-const navItems = ["Overview", "Incidents", "Vessels", "Alerts", "Reports"];
+const navItems = [
+    { id: "Overview", label: "Overview", icon: "◈", active: true },
+    { id: "Hindcast", label: "Hindcast", icon: "◀", active: false },
+    { id: "Forecast", label: "Forecast", icon: "▶", active: false },
+    { id: "AIS Analysis", label: "AIS Analysis", icon: "⟐", active: false },
+    { id: "Suspects", label: "Suspects", icon: "◆", active: false },
+    { id: "Timeline", label: "Timeline", icon: "◈", active: false },
+    { id: "Images", label: "Images", icon: "▦", active: false },
+    { id: "Report", label: "Report", icon: "◧", active: false },
+];
 
 interface SideRailProps {
     activeSection: string;
@@ -6,5 +15,42 @@ interface SideRailProps {
 }
 
 export function SideRail({ activeSection, onNavigate }: SideRailProps) {
-    return <aside className="flex w-[220px] shrink-0 flex-col border-r border-line bg-white px-3 py-5 max-lg:hidden"><div className="mb-7 px-3"><p className="eyebrow text-signal">Workspace</p><p className="mt-1 text-xs font-semibold text-[#173247]">Operations center</p></div><nav className="space-y-1">{navItems.map((item, index) => <button className={`flex w-full items-center gap-3 rounded-sm px-3 py-2.5 text-left text-xs font-medium ${activeSection === item ? "bg-[#e8f5f8] text-signal" : "text-mist hover:bg-[#f1f6f8] hover:text-[#173247]"}`} key={item} onClick={() => onNavigate(item)} type="button"><span className="w-5 text-center text-[11px]">{["⌂", "◉", "≋", "!", "▤"][index]}</span><span className="flex-1">{item}</span>{item === "Alerts" && <span className="rounded-full bg-[#e8f5f8] px-1.5 py-0.5 font-mono text-[9px] text-signal">2</span>}</button>)}</nav><div className="mt-auto space-y-1 border-t border-line pt-4"><button className="flex w-full items-center gap-3 rounded-sm px-3 py-2.5 text-left text-xs text-mist hover:bg-[#f1f6f8]" type="button"><span className="w-5 text-center">⚙</span>Settings</button><p className="px-3 pt-4 text-[9px] text-mist/70">OCEANGUARD v1.0.0</p></div></aside>;
+    const activeNav = navItems.find((item) => item.id === activeSection) ?? navItems[0];
+    return (
+        <aside className="flex w-[72px] shrink-0 flex-col border-r border-line bg-panel/90 py-4 max-lg:w-16 max-lg:justify-center max-lg:px-2">
+            <div className="mb-6 flex h-9 w-9 items-center justify-center rounded-sm bg-signal font-bold text-white shadow-glow">
+                OG
+            </div>
+            <nav className="flex flex-col gap-1">
+                {navItems.map((item) => {
+                    const isActive = activeSection === item.id;
+                    return (
+                        <button
+                            className={`relative flex h-10 w-10 shrink-0 items-center justify-center rounded-sm transition-all duration-150 ${
+                                isActive
+                                    ? "bg-panelAlt text-signal shadow-glow"
+                                    : "text-mist hover:bg-panelAlt hover:text-ink"
+                            }`}
+                            key={item.id}
+                            onClick={() => onNavigate(item.id)}
+                            title={item.label}
+                            type="button"
+                        >
+                            <span className="text-lg">{item.icon}</span>
+                            {isActive && (
+                                <span className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-5 bg-signal rounded-r" />
+                            )}
+                        </button>
+                    );
+                })}
+            </nav>
+            <div className="mt-auto flex items-center gap-2 border-t border-line pt-3 px-1">
+                <span className="flex h-2 w-2 rounded-full bg-success">
+                    <span className="absolute inset-0 rounded-full bg-success" />
+                </span>
+                <span className="text-[8px] uppercase tracking-[.15em] text-mist">Online</span>
+            </div>
+            <p className="px-1 pb-2 text-[8px] uppercase tracking-[.2em] text-mist/60">v1.0.0</p>
+        </aside>
+    );
 }
