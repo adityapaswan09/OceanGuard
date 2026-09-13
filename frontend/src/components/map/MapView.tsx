@@ -204,15 +204,10 @@ export function MapView({
             setSource("hindcast-origin-marker", hindcastOriginData);
             setSource("hindcast-origin-label", hindcastOriginLabelData);
             setSource("hindcast-origin-reference", hindcastReferenceData);
-            // Particle cloud and uncertainty envelope (forecast)
-            const particleCloudData: FeatureCollection = analysis?.forward_particle_cloud ? (analysis.forward_particle_cloud as FeatureCollection) : emptyCollection;
-            const envelopeData: FeatureCollection = analysis?.uncertainty_envelope ? (analysis.uncertainty_envelope as FeatureCollection) : emptyCollection;
-            setSource("forward-particle-cloud", particleCloudData);
             setSource("forecast-centroid", forecastCentroidData);
             setSource("forecast-centroid-label", forecastCentroidLabelData);
             setSource("ais-vessel-tracks", aisTrackData);
             setSource("ais-vessel-markers", aisMarkerData);
-            setSource("uncertainty-envelope", envelopeData);
 
             // IDENTIFY SUSPECTS, step A: on the first successful identification, focus the camera on the
             // server-provided spill detection area (centroid + polygon, ~700ms). This takes
@@ -238,55 +233,14 @@ export function MapView({
                 }
             }
 
-            // Add layers for particle cloud and envelope if not already added
-            if (!map.getLayer("particle-points")) {
-                map.addLayer({
-                    id: "particle-points",
-                    type: "circle",
-                    source: "forward-particle-cloud",
-                    paint: {
-                        "circle-color": "#ff7f0e",
-                        "circle-radius": 4,
-                        "circle-stroke-color": "#ffffff",
-                        "circle-stroke-width": 1,
-                    },
-                });
-                map.addLayer({
-                    id: "uncertainty-envelope",
-                    type: "fill",
-                    source: "uncertainty-envelope",
-                    paint: {
-                        "fill-color": "#ff7f0e",
-                        "fill-opacity": 0.2,
-                    },
-                });
-                map.addLayer({
-                    id: "uncertainty-envelope-line",
-                    type: "line",
-                    source: "uncertainty-envelope",
-                    paint: {
-                        "line-color": "#ff7f0e",
-                        "line-width": 2,
-                    },
-                });
-            }
-
-            // Visibility handling for forecast related layers (including new ones)
-            // NOTE: particle-points and uncertainty-envelope removed from visibility control
-            // as they were creating a large transparent overlay that interfered with map interaction.
-            // Forecast centroid markers remain visible for reference.
+            // Forecast centroid markers remain available for reference without rendering the
+            // forecast particle cloud or uncertainty envelope over the map.
             ["forecast-centroid", "forecast-centroid-label", "forecast-centroid-ring"].forEach((layerId) => {
                 if (map.getLayer(layerId)) {
                     const shouldShow = investigationTab === "Forecast" && analysis?.forward_particle_cloud;
                     map.setLayoutProperty(layerId, "visibility", shouldShow ? "visible" : "none");
                 }
             });
-            // particle-points and uncertainty-envelope layers are no longer shown
-            // to prevent the large transparent overlay issue
-            if (map.getLayer("particle-points")) map.setLayoutProperty("particle-points", "visibility", "none");
-            if (map.getLayer("uncertainty-envelope")) map.setLayoutProperty("uncertainty-envelope", "visibility", "none");
-            if (map.getLayer("uncertainty-envelope-line")) map.setLayoutProperty("uncertainty-envelope-line", "visibility", "none");
-
                 map.addLayer({ id: "region-fill", type: "fill", source: "region", paint: { "fill-color": "#087ea4", "fill-opacity": 0.13 } });
                 map.addLayer({ id: "region-line", type: "line", source: "region", paint: { "line-color": "#087ea4", "line-width": 2 } });
                 map.addLayer({ id: "spill-glow", type: "line", source: "spill-polygon", paint: { "line-color": "#c45a3c", "line-width": 8, "line-opacity": 0.12, "line-blur": 3 } });
@@ -461,5 +415,5 @@ export function MapView({
         });
     }, [activeLayer]);
 
-    return <div className="absolute inset-0"><div className="absolute inset-0" ref={containerRef} /><div className="pointer-events-none absolute left-4 top-4 rounded-sm border border-white/80 bg-white/90 px-3 py-2 text-[10px] font-semibold uppercase tracking-[.14em] text-[#315a6a]">{region?.name ?? "Arabian Sea"} · live map</div>{loadError && <div className="absolute bottom-4 left-4 rounded-sm border border-[#e7b1a0] bg-white/95 px-3 py-2 text-[10px] text-[#9d4f3c]">API data unavailable · basemap still active</div>}</div>;
+    return <div className="absolute inset-0"><div className="absolute inset-0" ref={containerRef} /><div className="pointer-events-none absolute left-4 top-4 rounded-sm border border-[#31516a] bg-[#061624]/90 px-3 py-2 text-[10px] font-semibold uppercase tracking-[.14em] text-[#9ed7eb]">{region?.name ?? "Arabian Sea"} · live map</div>{loadError && <div className="pointer-events-none absolute bottom-4 left-4 rounded-sm border border-ember/50 bg-[#061624]/95 px-3 py-2 text-[10px] text-[#f0a58e]">API data unavailable · basemap still active</div>}</div>;
 }

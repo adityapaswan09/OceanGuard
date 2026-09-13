@@ -44,14 +44,14 @@ export function MapSurface({
                 identifyRun={identifyRun}
                 identified={identified}
             />
-            <div className="absolute right-5 top-5 z-10 flex rounded-sm border border-white/70 bg-white/90 p-1">
+            <div className="absolute right-5 top-5 z-10 flex rounded-sm border border-[#31516a] bg-[#061624]/95 p-1 shadow-panel">
                 {layers.map((layer) => (
-                    <button className={`px-3 py-2 text-[9px] font-semibold uppercase tracking-[.12em] ${activeLayer === layer ? "bg-signal text-white" : "text-mist hover:text-signal"}`} key={layer} onClick={() => onLayerChange(layer)} type="button">
+                    <button className={`px-3 py-2 text-[9px] font-semibold uppercase tracking-[.12em] ${activeLayer === layer ? "bg-signal text-[#02131f]" : "text-mist hover:bg-panelAlt hover:text-signal"}`} key={layer} onClick={() => onLayerChange(layer)} type="button">
                         {layer}
                     </button>
                 ))}
             </div>
-            <div className="absolute bottom-5 left-5 z-10 rounded-sm border border-white/70 bg-white/90 px-3 py-2 font-mono text-[10px] text-[#315a6a]">
+            <div className="pointer-events-none absolute bottom-5 left-5 z-10 rounded-sm border border-[#31516a] bg-[#061624]/95 px-3 py-2 font-mono text-[10px] text-[#9ed7eb]">
                 {analysis ? (
                     <>
                         <b>{analysis.detection.centroid_latlon.lat.toFixed(2)}°N</b><span className="mx-2 text-mist">/</span><b>{analysis.detection.centroid_latlon.lon.toFixed(2)}°E</b>

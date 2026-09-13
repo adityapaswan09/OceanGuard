@@ -68,7 +68,7 @@ export function InvestigationPanel({ activeTab, onTabChange, suspects, suspectsL
         ["Lookalike", analysis ? (analysis.detection.is_lookalike ? "Yes" : "No") : "Unavailable"],
         ["Texture signature", analysis ? `${analysis.detection.observed_texture_signature_db.toFixed(2)} dB` : "Unavailable"],
     ];
-    const tabs = ["Overview", "Hindcast", "Forecast", "AIS Analysis", "Suspects", "Timeline"];
+    const tabs = ["Overview", "Hindcast", "Forecast", "AIS Analysis", "Suspects", "Timeline", "Images", "Report"];
     const selectedSuspect = suspects.find((candidate) => candidate.vessel_id === selectedSuspectId);
 
     return <section className="w-full shrink-0 border-t border-line bg-panel/90 p-5 panel-shadow lg:border-l lg:border-t-0 lg:p-6">
