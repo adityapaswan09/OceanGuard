@@ -169,6 +169,23 @@ function generateSpillContours(
     return { type: "FeatureCollection", features };
 }
 
+// Deterministic sparse sampling of winning waypoint circles for a tactical, uncluttered AIS display
+function getSampledWaypointIndices(totalPoints: number, targetCount: number = 8): number[] {
+    if (totalPoints <= 0) return [];
+    if (totalPoints <= targetCount) {
+        return Array.from({ length: totalPoints }, (_, i) => i);
+    }
+    const numIntervals = Math.min(targetCount - 1, totalPoints - 1);
+    const indices: number[] = [];
+    for (let i = 0; i <= numIntervals; i++) {
+        const idx = Math.round((i * (totalPoints - 1)) / numIntervals);
+        if (indices.length === 0 || indices[indices.length - 1] !== idx) {
+            indices.push(idx);
+        }
+    }
+    return indices;
+}
+
 // Tactical layer specifications organized by visual hierarchy:
 // 1. Basemap (ESRI dark-gray / satellite canvas)
 // 2. Graticule coordinate lines
@@ -1120,15 +1137,16 @@ export function MapView({
 
                                     // Progressive slice along fullWinnerCoords
                                     const totalSegments = fullWinnerCoords.length - 1;
+                                    const sampledIndices = getSampledWaypointIndices(fullWinnerCoords.length, 8);
                                     let lineCoords: [number, number][] = [];
                                     let dotsCoords: [number, number][] = [];
 
                                     if (totalSegments <= 0) {
                                         lineCoords = fullWinnerCoords;
-                                        dotsCoords = fullWinnerCoords;
+                                        dotsCoords = sampledIndices.map((idx) => fullWinnerCoords[idx]);
                                     } else if (drawProgress >= 1) {
                                         lineCoords = fullWinnerCoords;
-                                        dotsCoords = fullWinnerCoords;
+                                        dotsCoords = sampledIndices.map((idx) => fullWinnerCoords[idx]);
                                     } else {
                                         const exactPos = drawProgress * totalSegments;
                                         const segIdx = Math.min(Math.floor(exactPos), totalSegments - 1);
@@ -1140,7 +1158,9 @@ export function MapView({
                                             p0[1] + (p1[1] - p0[1]) * segRemainder,
                                         ];
                                         lineCoords = [...fullWinnerCoords.slice(0, segIdx + 1), tip];
-                                        dotsCoords = fullWinnerCoords.slice(0, segIdx + 1);
+                                        dotsCoords = sampledIndices
+                                            .filter((idx) => idx <= segIdx)
+                                            .map((idx) => fullWinnerCoords[idx]);
                                     }
 
                                     // Update line GeoJSON
@@ -1155,7 +1175,7 @@ export function MapView({
                                         ] : [],
                                     });
 
-                                    // Update waypoints GeoJSON
+                                    // Update waypoints GeoJSON (sparse tactical dots)
                                     setSource("caw-winner-marker", {
                                         type: "FeatureCollection",
                                         features: dotsCoords.map((pt) => ({
@@ -1206,13 +1226,16 @@ export function MapView({
                             },
                         ] : [],
                     });
+                    const sampledIndices = getSampledWaypointIndices(fullWinnerCoords.length, 8);
                     setSource("caw-winner-marker", {
                         type: "FeatureCollection",
-                        features: fullWinnerCoords.map((pt) => ({
-                            type: "Feature",
-                            geometry: { type: "Point", coordinates: pt },
-                            properties: {},
-                        })),
+                        features: sampledIndices
+                            .map((idx) => fullWinnerCoords[idx])
+                            .map((pt) => ({
+                                type: "Feature",
+                                geometry: { type: "Point", coordinates: pt },
+                                properties: {},
+                            })),
                     });
                     updateWinnerCallout();
                 }
