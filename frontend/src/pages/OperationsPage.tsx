@@ -4,11 +4,9 @@ import { InvestigationPanel } from "../components/investigation/InvestigationPan
 import { IncidentRail } from "../components/incidents/IncidentRail";
 import { AppShell } from "../components/layout/AppShell";
 import { MapSurface } from "../components/map/MapSurface";
-import { TimelineBar } from "../components/operations/TimelineBar";
-import { VesselWatchlist } from "../components/vessels/VesselWatchlist";
 import { AlertsPage, type AlertRecord } from "./AlertsPage";
-import { API_BASE_URL, getAlphaSurface, getCustodesStatus } from "../services/api";
-import type { AisTrack, AlphaSurfaceResponse, CustodesStatusResponse, SpillAnalysis, SuspectCandidate } from "../types/intelligence";
+import { API_BASE_URL, getCustodesStatus } from "../services/api";
+import type { AisTrack, CustodesStatusResponse, SpillAnalysis, SuspectCandidate } from "../types/intelligence";
 
 const selectedSpillId = 1;
 type VesselRecord = { id: number; name: string; vessel_type?: string | null; flag?: string | null };
@@ -24,7 +22,6 @@ export function OperationsPage() {
     const [selectedSuspectId, setSelectedSuspectId] = useState<number | null>(null);
     const [detectionTime, setDetectionTime] = useState<string | null>(null);
     const [analysis, setAnalysis] = useState<SpillAnalysis | null>(null);
-    const [alphaSurface, setAlphaSurface] = useState<AlphaSurfaceResponse | null>(null);
     const [custodesStatus, setCustodesStatus] = useState<CustodesStatusResponse | null>(null);
     const [identified, setIdentified] = useState(false);
     const [identifiedAt, setIdentifiedAt] = useState<string | null>(null);
@@ -32,9 +29,9 @@ export function OperationsPage() {
     const [identifyError, setIdentifyError] = useState(false);
     const [identifyRun, setIdentifyRun] = useState(0);
 
-    const handleAlertOpen = (alert: AlertRecord) => {
+    const handleAlertOpen = (_alert: AlertRecord) => {
         setActiveSection("Overview");
-        if (alert.spillId) setActiveTab("Timeline");
+        setActiveTab("Overview");
     };
 
     const handleIdentifySuspects = () => {
@@ -45,16 +42,14 @@ export function OperationsPage() {
         setIdentified(false);
         setIdentifiedAt(null);
         setCustodesStatus(null);
-        setAlphaSurface(null);
         setSelectedSuspectId(null);
         // Each click is a new animation run for the AIS web -> fade sequence
         setIdentifyRun((run) => run + 1);
         if (aisTracks.length < 20) {
             loadAllVesselTracks();
         }
-        Promise.all([getAlphaSurface(selectedSpillId), getCustodesStatus(selectedSpillId)])
-            .then(([surface, status]) => {
-                setAlphaSurface(surface);
+        getCustodesStatus(selectedSpillId)
+            .then((status) => {
                 setCustodesStatus(status);
                 setIdentified(true);
                 setIdentifiedAt(new Date().toISOString());
@@ -64,7 +59,6 @@ export function OperationsPage() {
                 }
             })
             .catch(() => {
-                setAlphaSurface(null);
                 setCustodesStatus(null);
                 setIdentifiedAt(null);
                 setIdentifyError(true);
@@ -152,7 +146,6 @@ export function OperationsPage() {
     }, [loadAllVesselTracks]);
 
     useEffect(() => {
-        if (activeTab !== "Timeline") return;
         let cancelled = false;
         fetch(`${API_BASE_URL}/spills/`)
             .then((response) => response.json() as Promise<{ items?: Array<{ id: number; detection_time?: string | null }> }>)
@@ -166,7 +159,7 @@ export function OperationsPage() {
         return () => {
             cancelled = true;
         };
-    }, [activeTab]);
+    }, []);
 
     useEffect(() => {
         if (selectedSuspectId === null) return;
@@ -205,8 +198,6 @@ export function OperationsPage() {
     const winningVesselId = (identified && !isAbstain) ? (custodesStatus?.top_vessel ?? null) : null;
     const cawActive = identified && winningVesselId !== null;
 
-    const kpis = [["Active spills", "01", "Elevated"], ["Total area", analysis ? `${analysis.detection.physical_area_km2.toFixed(2)} km²` : "—", "Current incident"], ["Monitored vessels", "148", "AIS coverage"], ["Alerts", "03", "2 unread"]];
-
     return (
         <AppShell
             activeSection={activeSection}
@@ -228,7 +219,6 @@ export function OperationsPage() {
                             identified={identified}
                             identifyError={identifyError}
                             custodes={custodesStatus}
-                            alphaSurface={alphaSurface}
                             identifiedAt={identifiedAt}
                         />
 
@@ -248,7 +238,6 @@ export function OperationsPage() {
                                 isIdentifying={identifyLoading}
                                 identifyRun={identifyRun}
                                 identified={identified}
-                                alphaSurface={alphaSurface}
                                 suspects={suspects}
                                 onVesselSelect={setSelectedSuspectId}
                             />
@@ -269,7 +258,6 @@ export function OperationsPage() {
                             identifyLoading={identifyLoading}
                             identifyError={identifyError}
                             identified={identified}
-                            alphaSurface={alphaSurface}
                             custodes={custodesStatus}
                             winningVesselId={winningVesselId}
                         />

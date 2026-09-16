@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type { Map as MapLibreMap } from "maplibre-gl";
 import { MapView } from "./MapView";
-import type { AisTrack, AlphaSurfaceResponse, CustodesDecision, SpillAnalysis, SuspectCandidate } from "../../types/intelligence";
+import type { AisTrack, CustodesDecision, SpillAnalysis, SuspectCandidate } from "../../types/intelligence";
 
 interface MapSurfaceProps {
     activeLayer: string;
@@ -17,7 +17,6 @@ interface MapSurfaceProps {
     isIdentifying?: boolean;
     identifyRun?: number;
     identified?: boolean;
-    alphaSurface?: AlphaSurfaceResponse | null;
     suspects?: SuspectCandidate[];
     onVesselSelect?: (vesselId: number) => void;
 }
@@ -128,16 +127,16 @@ export function MapSurface({
     isIdentifying,
     identifyRun,
     identified,
-    alphaSurface,
     suspects,
     onVesselSelect,
 }: MapSurfaceProps) {
     const [mapInstance, setMapInstance] = useState<MapLibreMap | null>(null);
     const [cursorCoords, setCursorCoords] = useState<{ lon: number; lat: number } | null>(null);
     const [showLayersMenu, setShowLayersMenu] = useState(false);
+    const [hindcastRun, setHindcastRun] = useState(0);
+    const [forecastRun, setForecastRun] = useState(0);
     const [layerVisibility, setLayerVisibility] = useState({
         spill: true,
-        attributionAlpha: true,
         hindcast: true,
         forecast: true,
         ais: true,
@@ -162,8 +161,9 @@ export function MapSurface({
                 decision={decision}
                 isIdentifying={isIdentifying}
                 identifyRun={identifyRun}
+                hindcastRun={hindcastRun}
+                forecastRun={forecastRun}
                 identified={identified}
-                alphaSurface={alphaSurface}
                 suspects={suspects}
                 onVesselSelect={onVesselSelect}
                 onMapReady={setMapInstance}
@@ -233,18 +233,6 @@ export function MapSurface({
                             />
                         </label>
 
-                        <label className="flex cursor-pointer items-center justify-between hover:text-[#f8fafc]">
-                            <div className="flex items-center gap-2">
-                                <span className="inline-block h-2 w-2 rounded-sm bg-gradient-to-r from-[#06b6d4] to-[#ef4444]" />
-                                <span className="text-[#cbd5e1]">CAW Attribution Alpha</span>
-                            </div>
-                            <input
-                                type="checkbox"
-                                checked={layerVisibility.attributionAlpha}
-                                onChange={() => toggleLayer("attributionAlpha")}
-                                className="h-3.5 w-3.5 accent-[#0070f3] cursor-pointer"
-                            />
-                        </label>
 
                         <label className="flex cursor-pointer items-center justify-between hover:text-[#f8fafc]">
                             <div className="flex items-center gap-2">
@@ -412,6 +400,40 @@ export function MapSurface({
                     </button>
                 </div>
             </div>
+
+            {/* TACTICAL HINDCAST REPLAY BUTTON */}
+            {investigationTab === "Hindcast" && (
+                <div className="absolute bottom-16 left-1/2 -translate-x-1/2 z-20">
+                    <button
+                        type="button"
+                        onClick={() => setHindcastRun((r) => r + 1)}
+                        className="flex items-center gap-2 rounded-lg border border-[#00d4ff]/40 bg-[#051326]/90 px-3 py-1.5 text-xs font-semibold text-[#38bdf8] shadow-[0_0_15px_rgba(0,212,255,0.25)] backdrop-blur-md transition hover:border-[#00d4ff] hover:bg-[#082240] hover:text-white"
+                        title="Replay forensic backtracking drift animation"
+                    >
+                        <svg className="h-3.5 w-3.5 animate-spin-once" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67" />
+                        </svg>
+                        <span className="tracking-wide">REPLAY BACKTRACK</span>
+                    </button>
+                </div>
+            )}
+
+            {/* TACTICAL FORECAST REPLAY BUTTON */}
+            {investigationTab === "Forecast" && (
+                <div className="absolute bottom-16 left-1/2 -translate-x-1/2 z-20">
+                    <button
+                        type="button"
+                        onClick={() => setForecastRun((r) => r + 1)}
+                        className="flex items-center gap-2 rounded-lg border border-[#06b6d4]/40 bg-[#051326]/90 px-3 py-1.5 text-xs font-semibold text-[#22d4ee] shadow-[0_0_15px_rgba(6,182,212,0.25)] backdrop-blur-md transition hover:border-[#22d4ee] hover:bg-[#082240] hover:text-white"
+                        title="Replay hydrodynamic drift forecast animation"
+                    >
+                        <svg className="h-3.5 w-3.5 animate-spin-once" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67" />
+                        </svg>
+                        <span className="tracking-wide">REPLAY FORECAST</span>
+                    </button>
+                </div>
+            )}
 
             {/* BOTTOM-CENTER: Floating Investigation Navigation Pill */}
             <div className="absolute bottom-3.5 left-1/2 -translate-x-1/2 z-20 flex items-center gap-1 rounded-xl border border-[#162c44] bg-[#050f1d]/90 p-1 shadow-xl backdrop-blur-md">

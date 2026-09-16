@@ -4,9 +4,6 @@ const navItems = [
     { id: "Forecast", label: "Forecast", icon: "⟳" },
     { id: "AIS Analysis", label: "AIS Analysis", icon: "⛶" },
     { id: "Suspects", label: "Suspects", icon: "👤" },
-    { id: "Timeline", label: "Timeline", icon: "◷" },
-    { id: "Images", label: "Images", icon: "⧉" },
-    { id: "Report", label: "Report", icon: "▤" },
 ];
 
 interface SideRailProps {
@@ -48,7 +45,7 @@ export function SideRail({ investigationTab = "Overview", onTabChange }: SideRai
                     <span className="text-[9px] font-semibold text-[#cbd5e1]">System Online</span>
                 </div>
                 <p className="mt-1 font-mono text-[8px] uppercase tracking-wider text-[#5a7d96]">
-                    OCEANGUARD v1.0.0
+                    KAIDOS v1.0.0
                 </p>
             </div>
         </aside>

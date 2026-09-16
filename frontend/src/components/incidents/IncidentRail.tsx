@@ -1,4 +1,4 @@
-import type { AlphaSurfaceResponse, CustodesStatusResponse, SpillAnalysis } from "../../types/intelligence";
+import type { CustodesStatusResponse, SpillAnalysis } from "../../types/intelligence";
 
 interface IncidentRailProps {
     analysis: SpillAnalysis | null;
@@ -7,7 +7,6 @@ interface IncidentRailProps {
     identified?: boolean;
     identifyError?: boolean;
     custodes?: CustodesStatusResponse | null;
-    alphaSurface?: AlphaSurfaceResponse | null;
     identifiedAt?: string | null;
 }
 
@@ -43,7 +42,6 @@ export function IncidentRail({
     identified = false,
     identifyError = false,
     custodes = null,
-    alphaSurface = null,
     identifiedAt = null,
 }: IncidentRailProps) {
     // 1. Truthful Incident Overview extraction from analysis response
@@ -88,7 +86,7 @@ export function IncidentRail({
     }
 
     // Null Hypothesis
-    const nullAlphaVal = custodes?.null_alpha ?? alphaSurface?.null_alpha ?? null;
+    const nullAlphaVal = custodes?.null_alpha ?? null;
     let nullHypothesisText = "—";
     if (isAnalyzing) {
         nullHypothesisText = "ANALYZING…";
@@ -173,69 +171,91 @@ export function IncidentRail({
                 <div
                     className="absolute inset-0 bg-cover bg-center opacity-85"
                     style={{
-                        backgroundImage: `radial-gradient(circle at 45% 50%, rgba(2, 132, 199, 0.4), transparent 60%), radial-gradient(circle at 50% 50%, rgba(220, 38, 38, 0.5), transparent 30%), linear-gradient(135deg, #021a30 0%, #032d52 50%, #011424 100%)`,
+                        backgroundImage: `radial-gradient(circle at 50% 50%, rgba(2, 132, 199, 0.25), transparent 70%), linear-gradient(135deg, #021a30 0%, #032442 50%, #011424 100%)`,
                     }}
                 />
-                {/* Red Detection Bounding Box */}
-                <div className="absolute left-[38%] top-[30%] h-9 w-9 rounded-sm border-2 border-[#ef4444] shadow-[0_0_8px_rgba(239,68,68,0.6)] flex items-center justify-center">
-                    <span className="h-1.5 w-1.5 rounded-full bg-[#ef4444]" />
-                </div>
                 {/* Grid Overlay lines */}
-                <div className="absolute inset-0 opacity-20 bg-[linear-gradient(to_right,#00d4ff_1px,transparent_1px),linear-gradient(to_bottom,#00d4ff_1px,transparent_1px)] [background-size:24px_24px]" />
+                <div className="absolute inset-0 opacity-20 bg-[linear-gradient(to_right,#00d4ff_1px,transparent_1px),linear-gradient(to_bottom,#00d4ff_1px,transparent_1px)] [background-size:20px_20px]" />
+                {/* SAR Detected Irregular Slick Shape */}
+                <svg className="absolute inset-0 h-full w-full pointer-events-none" viewBox="0 0 200 120" preserveAspectRatio="xMidYMid meet">
+                    {/* Outer irregular slick */}
+                    <polygon
+                        points="57.1,25.1 68.0,21.5 80.7,17.3 94.3,26.0 113.3,28.7 126.0,41.4 137.8,55.9 147.7,81.3 141.4,95.8 125.1,93.0 107.9,99.4 88.9,94.9 76.2,81.3 64.4,69.5 60.8,52.3 56.2,37.8"
+                        fill="#dc2626"
+                        fillOpacity="0.25"
+                        stroke="#ef4444"
+                        strokeWidth="1.4"
+                        strokeLinejoin="round"
+                    />
+                    {/* Dense interior core */}
+                    <polygon
+                        points="75.1,39.8 81.4,37.6 88.8,35.2 96.7,40.3 107.7,41.9 115.1,49.2 121.9,57.6 127.7,72.3 124.0,80.7 114.6,79.2 104.6,82.8 93.5,80.2 86.2,72.3 79.3,65.5 77.2,55.5 74.6,47.1"
+                        fill="#991b1b"
+                        fillOpacity="0.45"
+                        stroke="#dc2626"
+                        strokeWidth="0.9"
+                        strokeLinejoin="round"
+                    />
+                    {/* Crisp centroid dot */}
+                    <circle cx="100" cy="60" r="2.5" fill="#ef4444" stroke="#ffffff" strokeWidth="1" />
+                </svg>
                 <span className="absolute bottom-1.5 right-2 rounded bg-[#020912]/80 px-1.5 py-0.5 font-mono text-[8px] text-[#00d4ff]">
                     SAR C-BAND
                 </span>
             </div>
 
-            {/* 2. KEY METRICS (2x2 Grid) */}
+            {/* 2. KEY METRICS (3 Balanced Cards) */}
             <div className="mt-4">
                 <p className="mb-2 text-[10px] font-bold uppercase tracking-wider text-[#7ab8d0]">
                     Key Metrics
                 </p>
-                <div className="grid grid-cols-2 gap-2">
-                    {/* Top Vessel Score */}
-                    <div className="rounded-lg border border-[#1b344b] bg-[#030d17] p-2.5">
-                        <p className="text-[8.5px] font-semibold uppercase tracking-wider text-[#62859e]">
-                            Top Vessel Score
-                        </p>
-                        <p
-                            className={`mt-1 font-mono text-base font-bold ${
-                                isAnalyzing
-                                    ? "text-[11px] text-[#00d4ff] animate-pulse"
-                                    : isAbstain || topVesselScoreText === "—"
-                                    ? "text-[#64748b]"
-                                    : "text-[#10b981]"
-                            }`}
-                        >
-                            {topVesselScoreText}
-                        </p>
+                <div className="space-y-2">
+                    {/* Top row: Top Vessel Score and Null Hypothesis */}
+                    <div className="grid grid-cols-2 gap-2">
+                        {/* Top Vessel Score */}
+                        <div className="rounded-lg border border-[#1b344b] bg-[#030d17] p-2.5">
+                            <p className="text-[8.5px] font-semibold uppercase tracking-wider text-[#62859e]">
+                                Top Vessel Score
+                            </p>
+                            <p
+                                className={`mt-1 font-mono text-base font-bold ${
+                                    isAnalyzing
+                                        ? "text-[11px] text-[#00d4ff] animate-pulse"
+                                        : isAbstain || topVesselScoreText === "—"
+                                        ? "text-[#64748b]"
+                                        : "text-[#10b981]"
+                                }`}
+                            >
+                                {topVesselScoreText}
+                            </p>
+                        </div>
+
+                        {/* Null Hypothesis */}
+                        <div className="rounded-lg border border-[#1b344b] bg-[#030d17] p-2.5">
+                            <p className="text-[8.5px] font-semibold uppercase tracking-wider text-[#62859e]">
+                                Null Hypothesis
+                            </p>
+                            <p
+                                className={`mt-1 font-mono text-base font-bold ${
+                                    isAnalyzing
+                                        ? "text-[11px] text-[#00d4ff] animate-pulse"
+                                        : nullHypothesisText === "—"
+                                        ? "text-[#64748b]"
+                                        : "text-[#f8fafc]"
+                                }`}
+                            >
+                                {nullHypothesisText}
+                            </p>
+                        </div>
                     </div>
 
-                    {/* Null Hypothesis */}
-                    <div className="rounded-lg border border-[#1b344b] bg-[#030d17] p-2.5">
-                        <p className="text-[8.5px] font-semibold uppercase tracking-wider text-[#62859e]">
-                            Null Hypothesis
-                        </p>
-                        <p
-                            className={`mt-1 font-mono text-base font-bold ${
-                                isAnalyzing
-                                    ? "text-[11px] text-[#00d4ff] animate-pulse"
-                                    : nullHypothesisText === "—"
-                                    ? "text-[#64748b]"
-                                    : "text-[#f8fafc]"
-                            }`}
-                        >
-                            {nullHypothesisText}
-                        </p>
-                    </div>
-
-                    {/* CAW Winner */}
-                    <div className="rounded-lg border border-[#1b344b] bg-[#030d17] p-2.5">
+                    {/* Bottom row: CAW Winner full-width card */}
+                    <div className="rounded-lg border border-[#1b344b] bg-[#030d17] px-3 py-2 flex items-center justify-between">
                         <p className="text-[8.5px] font-semibold uppercase tracking-wider text-[#62859e]">
                             CAW Winner
                         </p>
                         <p
-                            className={`mt-1 font-mono text-[11px] font-bold truncate ${
+                            className={`font-mono text-xs font-bold truncate ${
                                 isAnalyzing
                                     ? "text-[#00d4ff] animate-pulse"
                                     : isAbstain
@@ -247,16 +267,6 @@ export function IncidentRail({
                             title={cawWinnerText}
                         >
                             {cawWinnerText}
-                        </p>
-                    </div>
-
-                    {/* Alpha Surface */}
-                    <div className="rounded-lg border border-[#1b344b] bg-[#030d17] p-2.5">
-                        <p className="text-[8.5px] font-semibold uppercase tracking-wider text-[#62859e]">
-                            Alpha Surface
-                        </p>
-                        <p className="mt-1 font-mono text-sm font-bold text-[#f8fafc]">
-                            20 × 30 km
                         </p>
                     </div>
                 </div>

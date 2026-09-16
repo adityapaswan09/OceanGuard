@@ -5,9 +5,9 @@ export function TopBar() {
     return (
         <header className="flex h-13 shrink-0 items-center justify-between border-b border-[#1b344b] bg-[#030d17] px-4 lg:px-6">
             <div className="flex items-center gap-3">
-                <div className="flex h-8 w-8 items-center justify-center rounded border border-[#00d4ff]/40 bg-[#061e33] font-mono text-xs font-bold text-[#00d4ff] shadow-[0_0_10px_rgba(0,212,255,0.15)]">OG</div>
+                <div className="flex h-8 w-8 items-center justify-center rounded border border-[#00d4ff]/40 bg-[#061e33] font-mono text-xs font-bold text-[#00d4ff] shadow-[0_0_10px_rgba(0,212,255,0.15)]">KD</div>
                 <div>
-                    <p className="font-display text-sm font-bold tracking-tight text-[#f8fafc]">OceanGuard</p>
+                    <p className="font-display text-sm font-bold tracking-tight text-[#f8fafc]">KAIDOS</p>
                     <p className="text-[8.5px] font-semibold uppercase tracking-[.18em] text-[#5a7d96]">Maritime Intelligence Platform</p>
                 </div>
             </div>
